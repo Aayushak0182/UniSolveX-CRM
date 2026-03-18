@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniSolveX | Admin CRM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Navigation Bar -->
+    <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
+        <div class="flex items-center gap-2">
+            <div class="bg-indigo-600 text-white p-1.5 rounded-lg">
+                <i data-lucide="graduation-cap"></i>
+            </div>
+            <span class="font-bold text-xl text-gray-800">UniSolveX <span class="text-indigo-600">CRM</span></span>
+        </div>
+        <div class="flex items-center gap-3 border-l pl-4">
+            <div class="text-right leading-tight">
+                <div id="whatsappStatus" class="text-[11px] font-semibold text-gray-500 whitespace-nowrap">WA: checking...</div>
+                <div id="whatsappLastEvent" class="text-[10px] text-gray-400 whitespace-nowrap">Last webhook: -</div>
+            </div>
+            <span id="agentNameDisplay" class="text-sm font-medium text-gray-600">Agent: </span>
+            <div id="agentInitialDisplay" class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold"></div>
+            <button id="logoutBtn" class="ml-1 px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50">
+                Logout
+            </button>
+        </div>
+    </nav>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <aside class="contact-panel bg-white border-r flex flex-col">
+            <div class="p-4 border-b flex items-center gap-2 contact-toolbar">
+                <div class="relative flex-1 contact-search-wrap">
+                    <i data-lucide="search" class="absolute left-3 top-2.5 text-gray-400 w-4 h-4"></i>
+                    <input id="contactSearch" type="text" placeholder="Search name or ID..." class="w-full pl-9 pr-3 py-2 bg-gray-50 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <div class="contact-toolbar-actions">
+                    <button id="toggleContactPanelWidth" class="contact-panel-toggle p-2 border rounded-md text-gray-600 bg-white hover:bg-gray-50" title="Expand / Collapse contacts panel" aria-pressed="false" type="button">
+                        <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+                    </button>
+                    <select id="contactFilter" class="contact-filter px-2 py-2 border rounded-md text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                        <option value="">Filter</option>
+                        <option value="new">New Client</option>
+                        <option value="old">Old Client</option>
+                        <option value="tutor">Tutor</option>
+                        <option value="friend">Client's Friend</option>
+                        <option value="useless">Useless/Broker</option>
+                    </select>
+                    <button id="addContactBtn" class="add-contact-btn px-2.5 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 whitespace-nowrap">
+                        Add Contact
+                    </button>
+                </div>
+            </div>
+            <div id="contactList" class="flex-1 overflow-y-auto custom-scrollbar">
+            </div>
+        </aside>
+
+        <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
+            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+                <div>
+                    <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Chat with Jiyani</h2>
+                    <p id="chatHeaderStatus" class="text-xs text-green-600 flex items-center gap-1">
+                        <span class="w-2 h-2 bg-green-500 rounded-full"></span> Active Now
+                    </p>
+                </div>
+                <button id="createTaskBtn" class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-md">
+                    <i data-lucide="plus-circle" class="w-4 h-4"></i> Create Task Card
+                </button>
+            </div>
+
+            <div id="chatMessages" class="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4 bg-[#f8f9fa]">
+                <div class="flex flex-col items-start">
+                    <div class="chat-bubble-client p-3 max-w-md shadow-sm text-sm text-gray-700">
+                        And how much would you charge me for the SAP project?
+                    </div>
+                    <span class="text-[10px] text-gray-400 mt-1 ml-1">9:05 AM</span>
+                </div>
+
+                <div class="flex flex-col items-end">
+                    <div class="chat-bubble-admin p-3 max-w-md shadow-sm text-sm text-gray-800">
+                        Alright, this will cost you 75 CAD. Shall I confirm and start the work?
+                    </div>
+                    <span class="text-[10px] text-gray-400 mt-1 mr-1">9:15 AM</span>
+                </div>
+            </div>
+
+            <div class="p-4 border-t bg-white">
+                <div class="flex items-center gap-3 bg-gray-50 p-2 rounded-xl border">
+                    <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
+                        <i data-lucide="paperclip" class="w-5 h-5"></i>
+                    </button>
+                    <input id="chatFileInput" type="file" class="hidden" multiple>
+                    <input id="chatInput" type="text" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2">
+                    <button id="notifyBtn" class="p-2 text-orange-500 hover:bg-orange-50 rounded-full" title="Initiate Notification">
+                        <i data-lucide="bell-ring" class="w-5 h-5"></i>
+                    </button>
+                    <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700">
+                        <span class="text-sm font-bold">Send</span>
+                        <i data-lucide="send" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <aside class="order-panel bg-gray-50 border-l flex flex-col">
+             <div class="p-4 border-b bg-white space-y-2">
+                 <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                     <i data-lucide="shopping-bag" class="w-4 h-4"></i> Order Details
+                 </h3>
+                 <div class="relative">
+                     <i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i>
+                     <input id="orderSearch" type="text" placeholder="Search by Client ID / Order ID" class="w-full pl-8 pr-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                 </div>
+                 <select id="orderDeliveryWindow" class="w-full px-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                     <option value="">Delivery: All</option>
+                     <option value="24h">Next 24 hours</option>
+                     <option value="2d">Next 2 days</option>
+                     <option value="7d">Next 7 days</option>
+                 </select>
+             </div>
+            <div id="orderList" class="p-3 overflow-y-auto custom-scrollbar space-y-2">
+                <div class="order-card bg-red-50 p-3 rounded-lg border border-red-200 shadow-sm" data-service-type="Project" data-client-id="507512" data-assigned-to="Aayush" data-created-by="Aayush" data-labels="" data-description="" data-instructions="" data-topic="" data-live-sessions="0" data-activity="" data-expert-deadline="15/02/2026" data-expert-payout="INR 0" data-session-start="" data-session-duration="">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="order-status text-[10px] font-bold uppercase text-orange-600 bg-orange-50 px-2 py-0.5 rounded">In Progress</span>
+                        <div class="flex items-center gap-2">
+                            <span class="order-id text-[10px] text-gray-400 font-mono">#507512</span>
+                            <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
+                                <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="order-title-row flex items-center gap-2">
+                        <h4 class="order-title text-sm font-bold text-gray-800">SAP for Accounting</h4>
+                        <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Project</span>
+                    </div>
+                    <p class="order-client-note text-[11px] text-gray-500 mt-0.5">Jiyani Nency</p>
+                    <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
+                        <p>C.A - <span class="order-amount font-semibold text-indigo-600">CAD 100</span><span class="order-payment-indicator hidden ml-1"></span></p>
+                        <p>E.D - <span class="order-expert-deadline text-amber-700 font-medium">15/02/2026</span></p>
+                        <p>C.D - <span class="order-deadline text-red-500 font-medium">13/02/2026</span></p>
+                        <p>By - <span class="order-created-by text-gray-700 font-medium">Aayush</span></p>
+                    </div>
+                </div>
+
+                <div class="order-card bg-blue-50 p-3 rounded-lg border border-blue-200 shadow-sm opacity-80" data-service-type="Assignment Help" data-client-id="509200" data-assigned-to="Aayush" data-created-by="Aayush" data-labels="" data-description="" data-instructions="" data-topic="" data-live-sessions="0" data-activity="" data-expert-deadline="Completed" data-expert-payout="INR 0" data-session-start="" data-session-duration="">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="order-status text-[10px] font-bold uppercase text-green-600 bg-green-50 px-2 py-0.5 rounded">Completed</span>
+                        <div class="flex items-center gap-2">
+                            <span class="order-id text-[10px] text-gray-400 font-mono">#509200</span>
+                            <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
+                                <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="order-title-row flex items-center gap-2">
+                        <h4 class="order-title text-sm font-bold text-gray-800">Business Assignment</h4>
+                        <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Assignment Help</span>
+                    </div>
+                    <p class="order-client-note text-[11px] text-gray-500 mt-0.5">Priyanka Sharma</p>
+                    <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
+                        <p>C.A - <span class="order-amount font-semibold text-indigo-600">INR 2000</span><span class="order-payment-indicator hidden ml-1"></span></p>
+                        <p>E.D - <span class="order-expert-deadline text-amber-700 font-medium">Completed</span></p>
+                        <p>C.D - <span class="order-deadline text-red-500 font-medium">Completed</span></p>
+                        <p>By - <span class="order-created-by text-gray-700 font-medium">Aayush</span></p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div id="taskModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-96 p-6">
+            <h3 class="text-lg font-bold mb-4">Create Task (Device 5)</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Client</label>
+                    <input id="taskClientInput" type="text" value="Jiyani Nency (507512)" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Service Type</label>
+                    <select id="taskServiceType" class="w-full mt-1 p-2 border rounded text-sm focus:ring-2 focus:ring-indigo-500">
+                        <option>Assignment Help</option>
+                        <option>Consultation</option>
+                        <option>Live Session</option>
+                        <option>Project</option>
+                        <option>Full Course</option>
+                    </select>
+                </div>
+                <div id="liveSessionCreateFields" class="hidden space-y-2">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Session Start Time</label>
+                        <input id="taskSessionStart" type="datetime-local" class="w-full mt-1 p-2 border rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Duration (Minutes)</label>
+                        <input id="taskSessionDuration" type="number" min="1" placeholder="60" class="w-full mt-1 p-2 border rounded text-sm">
+                    </div>
+                </div>
+                <div class="flex gap-2 pt-4">
+                    <button id="closeTaskModalBtn" class="flex-1 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+                    <button id="createTaskModalBtn" class="flex-1 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="orderDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[1050px] max-w-[96vw] h-[88vh] overflow-y-auto p-6">
+            <div class="sticky top-0 z-20 bg-white border-b pb-2 mb-3 flex justify-between items-center">
+                <h3 class="text-lg font-bold">Order Card Details</h3>
+                <button id="closeOrderDetailsBtn" class="text-sm px-2 py-1 rounded hover:bg-gray-100">Close</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div class="md:col-span-2 space-y-3">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Title</label>
+                        <input id="odTitle" type="text" class="w-full mt-1 p-2 border rounded-md">
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Service Type</label>
+                            <input id="odServiceType" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Status</label>
+                            <select id="odStatus" class="w-full mt-1 p-2 border rounded-md">
+                                <option>New</option>
+                                <option>In Progress</option>
+                                <option>Completed</option>
+                                <option>On Hold</option>
+                                <option>Cancelled</option>
+                                <option>Refund</option>
+                                <option>Archive</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Order ID</label>
+                            <input id="odOrderId" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Client ID</label>
+                            <input id="odClientId" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Assigned To</label>
+                            <input id="odAssignedTo" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Created By</label>
+                            <input id="odCreatedBy" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Labels</label>
+                            <input id="odLabels" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Actual Deadline</label>
+                            <input id="odActualDeadline" type="datetime-local" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Deadline</label>
+                            <input id="odExpertDeadline" type="datetime-local" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Base Amount</label>
+                            <div class="mt-1 flex gap-2">
+                                <select id="odBaseCurrency" class="w-24 p-2 border rounded-md bg-white">
+                                    <option value="INR">INR</option>
+                                    <option value="CAD">CAD</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="AUD">AUD</option>
+                                </select>
+                                <input id="odBaseAmountValue" type="text" placeholder="Amount" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Payout</label>
+                            <div class="mt-1 flex gap-2">
+                                <input type="text" value="INR" readonly class="w-20 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                                <input id="odExpertPayout" type="text" placeholder="Amount" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Additional Charges</label>
+                            <input id="odAdditionalCharges" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Client Paid Amount</label>
+                            <div class="mt-1 flex gap-2">
+                                <select id="odClientPaidCurrency" class="w-24 p-2 border rounded-md bg-white">
+                                    <option value="INR">INR</option>
+                                    <option value="CAD">CAD</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="AUD">AUD</option>
+                                </select>
+                                <input id="odClientPaidAmount" type="text" placeholder="Amount paid by client" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Payment Status (Manual)</label>
+                            <select id="odPaymentStatusOverride" class="w-full mt-1 p-2 border rounded-md bg-white">
+                                <option value="auto">Auto (By Amount)</option>
+                                <option value="partial">Partial</option>
+                                <option value="complete">Complete</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Session Start Time</label>
+                            <input id="odSessionStart" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Session Duration (Min)</label>
+                            <input id="odSessionDuration" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Description</label>
+                        <textarea id="odDescription" class="w-full mt-1 p-2 border rounded-md" rows="2"></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Topic</label>
+                            <input id="odTopic" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Activity / Comment</label>
+                        <textarea id="odActivity" class="w-full mt-1 p-2 border rounded-md" rows="2"></textarea>
+                        <div class="mt-2 flex justify-end">
+                            <button id="saveCommentBtn" type="button" class="px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700">
+                                Save Comment
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Comment History</label>
+                        <div id="odCommentHistory" class="w-full mt-1 p-2 border rounded-md bg-gray-50 min-h-[90px] max-h-[180px] overflow-y-auto text-xs text-gray-700 space-y-2"></div>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div class="bg-gray-50 border rounded-md p-3">
+                        <p class="text-xs font-bold text-gray-500 uppercase">Quick Actions</p>
+                        <ul class="mt-2 text-xs text-gray-600 space-y-1">
+                            <li>Agents</li>
+                            <li>Labels</li>
+                            <li>Checklist</li>
+                            <li>Actual Deadline</li>
+                            <li>Expert Deadline</li>
+                            <li>Attachment</li>
+                            <li>Order Payment</li>
+                        </ul>
+                    </div>
+                    <button id="saveOrderDetailsBtn" class="w-full py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

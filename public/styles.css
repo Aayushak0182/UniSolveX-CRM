@@ -1,0 +1,57 @@
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+.chat-bubble-client { background-color: #f3f4f6; border-radius: 0 12px 12px 12px; }
+.chat-bubble-admin { background-color: #dcfce7; border-radius: 12px 0 12px 12px; }
+
+/* Contacts panel: allow horizontal stretch so search text stays visible. */
+.contact-panel {
+  flex: 0 0 auto;
+  width: 320px;
+  min-width: 260px;
+  max-width: 520px;
+  resize: horizontal;
+  overflow: hidden; /* required for resize to work */
+}
+
+.contact-panel.is-wide {
+  width: 460px;
+}
+
+.contact-panel-toggle svg {
+  transition: transform 180ms ease;
+}
+
+.contact-panel-toggle.is-wide svg {
+  transform: rotate(180deg);
+}
+
+/* Keep right panel stable; chat uses remaining space. */
+.order-panel {
+  flex: 0 0 auto;
+  width: 380px;
+  min-width: 320px;
+  max-width: 520px;
+}
+
+/* When searching, temporarily hide filter/button to give full room to the input. */
+.contact-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 999px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-width 180ms ease, opacity 120ms ease;
+  white-space: nowrap;
+}
+
+.contact-toolbar.is-searching .contact-toolbar-actions {
+  max-width: 0;
+  opacity: 0;
+}
+
+@media (max-width: 1100px) {
+  .contact-panel { width: 280px; }
+  .contact-panel.is-wide { width: 380px; }
+  .order-panel { width: 320px; }
+}
