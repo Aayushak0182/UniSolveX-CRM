@@ -2,6 +2,31 @@
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 .chat-bubble-client { background-color: #f3f4f6; border-radius: 0 12px 12px 12px; }
 .chat-bubble-admin { background-color: #dcfce7; border-radius: 12px 0 12px 12px; }
+.chat-bubble-file {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.chat-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.75rem;
+  color: #374151;
+}
+.chat-attachment-chip button {
+  border: 0;
+  background: transparent;
+  color: #ef4444;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
 
 /* Contacts panel: allow horizontal stretch so search text stays visible. */
 .contact-panel {
@@ -54,4 +79,52 @@
   .contact-panel { width: 280px; }
   .contact-panel.is-wide { width: 380px; }
   .order-panel { width: 320px; }
+}
+
+@media (max-width: 900px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  body > .flex.flex-1.overflow-hidden {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .contact-panel,
+  .contact-panel.is-wide,
+  .order-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    resize: none;
+  }
+
+  .contact-panel {
+    max-height: 35vh;
+  }
+
+  .chat-panel {
+    min-height: 70vh;
+  }
+
+  .order-panel {
+    border-left: 0;
+    border-top: 1px solid #e5e7eb;
+    min-height: 32vh;
+  }
+
+  nav {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  nav > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+    border-left: 0;
+    padding-left: 0;
+  }
 }

@@ -30,6 +30,8 @@ lucide.createIcons();
         const chatFileInput = document.getElementById('chatFileInput');
         const chatHeaderTitle = document.getElementById('chatHeaderTitle');
         const chatHeaderStatus = document.getElementById('chatHeaderStatus');
+        const chatWindowTimerEl = document.getElementById('chatWindowTimer');
+        const chatComposerAttachmentsEl = document.getElementById('chatComposerAttachments');
         let activeOrderCard = null;
         let activeWhatsappWaId = '';
         const orderSequenceByClient = {};
@@ -42,12 +44,15 @@ lucide.createIcons();
         const CONTACT_PANEL_WIDE_STORAGE_KEY = 'unisolvex_contact_panel_wide_v1';
         const configuredWhatsappApiBase = localStorage.getItem(WHATSAPP_API_BASE_STORAGE_KEY);
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
+        const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
             ? 'http://localhost:3001'
-            : window.location.origin;
+            : RENDER_WHATSAPP_API_BASE;
         const WHATSAPP_API_FALLBACK_TIMEOUT_MS = 2500;
         const WHATSAPP_POLL_INTERVAL_MS = 5000;
         const WHATSAPP_DEBUG_POLL_INTERVAL_MS = 8000;
+        const WHATSAPP_CHAT_WINDOW_MS = 24 * 60 * 60 * 1000;
+        const WHATSAPP_WINDOW_TICK_MS = 30000;
         const whatsappMessagesByContact = {};
         const whatsappMessageStatusById = {};
         let whatsappPollingTimer = null;
@@ -56,6 +61,8 @@ lucide.createIcons();
         let activeWhatsappApiBase = '';
         let reachableWhatsappApiBases = [];
         let contactOrderCounter = contactItems.length;
+        let whatsappWindowTimerId = null;
+        let pendingAttachments = [];
 
         function setWhatsappStatus(text, level) {
             if (!whatsappStatusEl) return;
@@ -272,6 +279,8 @@ lucide.createIcons();
             if (value === '24h') return 24 * 60 * 60 * 1000;
             if (value === '2d') return 2 * 24 * 60 * 60 * 1000;
             if (value === '7d') return 7 * 24 * 60 * 60 * 1000;
+            if (value === 'past24h') return -24 * 60 * 60 * 1000;
+            if (value === 'past7d') return -7 * 24 * 60 * 60 * 1000;
             return 0;
         }
 
@@ -294,6 +303,15 @@ lucide.createIcons();
                     } else {
                         const diffMs = due.getTime() - now.getTime();
                         matchesWindow = diffMs >= 0 && diffMs <= windowMs;
+                    }
+                } else if (windowMs < 0) {
+                    const deadlineRaw = card.querySelector('.order-deadline')?.textContent?.trim() || '';
+                    const due = parseCardDateTime(deadlineRaw);
+                    if (!due) {
+                        matchesWindow = false;
+                    } else {
+                        const ageMs = now.getTime() - due.getTime();
+                        matchesWindow = ageMs >= 0 && ageMs <= Math.abs(windowMs);
                     }
                 }
 
@@ -674,26 +692,114 @@ lucide.createIcons();
             return size.toFixed(precision) + ' ' + units[unitIndex];
         }
 
-        function appendFileMessage(file) {
-            if (!chatMessages || !file) return;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'flex flex-col items-end';
-            const now = new Date();
-            const hh = now.getHours() % 12 || 12;
-            const mm = String(now.getMinutes()).padStart(2, '0');
-            const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
-            const timestamp = hh + ':' + mm + ' ' + ampm;
+        function detectAttachmentType(fileName, mimeType) {
+            const type = String(mimeType || '').toLowerCase();
+            const name = String(fileName || '').toLowerCase();
+            if (type.startsWith('image/')) return 'image';
+            if (type.startsWith('audio/')) return 'audio';
+            if (type.startsWith('video/')) return 'video';
+            if (name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') || name.endsWith('.gif') || name.endsWith('.webp')) return 'image';
+            if (name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg') || name.endsWith('.m4a')) return 'audio';
+            if (name.endsWith('.mp4') || name.endsWith('.mov') || name.endsWith('.webm')) return 'video';
+            return 'document';
+        }
 
-            wrapper.innerHTML = `
-                <div class="chat-bubble-admin p-3 max-w-md shadow-sm text-sm text-gray-800">
-                    <p class="font-semibold">Attachment</p>
-                    <p class="mt-1">${file.name}</p>
-                    <p class="text-[11px] text-gray-500 mt-1">${formatFileSize(file.size)}</p>
-                </div>
-                <span class="text-[10px] text-gray-400 mt-1 mr-1">${timestamp}</span>
-            `;
-            chatMessages.appendChild(wrapper);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+        function renderAttachmentQueue() {
+            if (!chatComposerAttachmentsEl) return;
+            chatComposerAttachmentsEl.innerHTML = '';
+            chatComposerAttachmentsEl.classList.toggle('hidden', pendingAttachments.length === 0);
+            pendingAttachments.forEach((file, index) => {
+                const chip = document.createElement('div');
+                chip.className = 'chat-attachment-chip';
+                chip.innerHTML = `
+                    <span>${escapeHtml(file.name)} (${formatFileSize(file.size)})</span>
+                    <button type="button" data-index="${index}" aria-label="Remove attachment">&times;</button>
+                `;
+                chatComposerAttachmentsEl.appendChild(chip);
+            });
+            Array.from(chatComposerAttachmentsEl.querySelectorAll('button[data-index]')).forEach((btn) => {
+                btn.onclick = function() {
+                    const index = Number(this.dataset.index);
+                    pendingAttachments = pendingAttachments.filter((_, itemIndex) => itemIndex !== index);
+                    renderAttachmentQueue();
+                };
+            });
+        }
+
+        function queueAttachments(files) {
+            const selectedFiles = Array.from(files || []);
+            if (!selectedFiles.length) return;
+            pendingAttachments.push(...selectedFiles);
+            renderAttachmentQueue();
+        }
+
+        function getWhatsappWindowState(messages) {
+            const rows = Array.isArray(messages) ? messages : [];
+            const latestIncoming = [...rows]
+                .filter((row) => row?.direction === 'incoming' && row?.timestamp)
+                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+            if (!latestIncoming) {
+                return {
+                    state: 'waiting',
+                    label: '24h window: waiting for client message',
+                    shortLabel: 'Waiting for first reply'
+                };
+            }
+            const startedAt = new Date(latestIncoming.timestamp).getTime();
+            if (!Number.isFinite(startedAt)) {
+                return {
+                    state: 'waiting',
+                    label: '24h window: waiting for client message',
+                    shortLabel: 'Waiting for first reply'
+                };
+            }
+            const expiresAt = startedAt + WHATSAPP_CHAT_WINDOW_MS;
+            const remainingMs = expiresAt - Date.now();
+            if (remainingMs <= 0) {
+                return {
+                    state: 'expired',
+                    label: '24h window: expired - use chat initiation',
+                    shortLabel: 'Expired',
+                    expiresAt
+                };
+            }
+            const totalMinutes = Math.floor(remainingMs / 60000);
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            const pretty = `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m left`;
+            return {
+                state: 'open',
+                label: `24h window: ${pretty}`,
+                shortLabel: pretty,
+                expiresAt
+            };
+        }
+
+        function updateChatWindowState(waId) {
+            if (!chatHeaderStatus || !chatWindowTimerEl) return;
+            const state = getWhatsappWindowState(whatsappMessagesByContact[waId] || []);
+            const isOpen = state.state === 'open';
+            const isExpired = state.state === 'expired';
+            chatHeaderStatus.innerHTML = `<span class="w-2 h-2 rounded-full ${isOpen ? 'bg-green-500' : isExpired ? 'bg-red-500' : 'bg-amber-400'}"></span> ${isOpen ? 'WhatsApp Connected' : isExpired ? '24h Window Closed' : 'Waiting for first client message'}`;
+            chatHeaderStatus.classList.remove('text-green-600', 'text-red-600', 'text-amber-700');
+            chatHeaderStatus.classList.add(isOpen ? 'text-green-600' : isExpired ? 'text-red-600' : 'text-amber-700');
+            chatWindowTimerEl.textContent = isOpen ? state.shortLabel.replace(' left', '') : isExpired ? 'EXPIRED' : '--:--:--';
+            chatWindowTimerEl.classList.remove('text-green-700', 'text-red-600', 'text-amber-700');
+            chatWindowTimerEl.classList.add(isOpen ? 'text-green-700' : isExpired ? 'text-red-600' : 'text-amber-700');
+        }
+
+        function refreshWhatsappWindowStateUi() {
+            if (activeWhatsappWaId) {
+                updateChatWindowState(activeWhatsappWaId);
+            }
+        }
+
+        function initWhatsappWindowTimer() {
+            if (whatsappWindowTimerId) return;
+            refreshWhatsappWindowStateUi();
+            whatsappWindowTimerId = setInterval(() => {
+                refreshWhatsappWindowStateUi();
+            }, WHATSAPP_WINDOW_TICK_MS);
         }
 
         function renderCommentHistory(comments) {
@@ -789,8 +895,8 @@ lucide.createIcons();
                 refreshContactOrder();
                 applyContactFilter();
                 if (chatHeaderTitle) chatHeaderTitle.textContent = 'Chat with ' + name;
-                if (chatHeaderStatus) chatHeaderStatus.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full"></span> WhatsApp Connected';
                 renderWhatsappMessages(waId);
+                updateChatWindowState(waId);
             });
         }
 
@@ -840,22 +946,37 @@ lucide.createIcons();
             chatMessages.innerHTML = '';
             if (!messages.length) {
                 chatMessages.innerHTML = '<p class="text-sm text-gray-500">No WhatsApp messages yet.</p>';
+                updateChatWindowState(waId);
                 return;
             }
             messages.forEach((msg) => {
                 const wrap = document.createElement('div');
                 const incoming = msg.direction === 'incoming';
                 const statusTick = incoming ? '' : getStatusTickHtml(msg.status);
+                const messageType = msg.messageType || 'text';
+                const attachmentName = escapeHtml(msg.attachmentName || '');
+                const attachmentUrl = String(msg.attachmentUrl || '').trim();
+                const bubbleBody = messageType !== 'text'
+                    ? `
+                        <div class="chat-bubble-file">
+                            <p class="font-semibold capitalize">${escapeHtml(messageType)}</p>
+                            ${attachmentName ? `<p>${attachmentName}</p>` : ''}
+                            ${attachmentUrl ? `<a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs font-medium text-indigo-700 underline">Open attachment</a>` : ''}
+                            ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
+                        </div>
+                    `
+                    : escapeHtml(msg.text || '[Unsupported message type]');
                 wrap.className = 'flex flex-col ' + (incoming ? 'items-start' : 'items-end');
                 wrap.innerHTML = `
                     <div class="${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800">
-                        ${escapeHtml(msg.text || '[Unsupported message type]')}
+                        ${bubbleBody}
                     </div>
                     <span class="text-[10px] text-gray-400 mt-1 ${incoming ? 'ml-1' : 'mr-1'}">${formatChatTime(msg.timestamp)}${statusTick}</span>
                 `;
                 chatMessages.appendChild(wrap);
             });
             chatMessages.scrollTop = chatMessages.scrollHeight;
+            updateChatWindowState(waId);
         }
 
         function applyWhatsappMessageStatusUpdate(payload) {
@@ -951,6 +1072,10 @@ lucide.createIcons();
                 text: payload.text || '',
                 timestamp: payload.timestamp || new Date().toISOString(),
                 direction: payload.direction || 'incoming',
+                messageType: payload.messageType || 'text',
+                attachmentName: payload.attachmentName || '',
+                attachmentUrl: payload.attachmentUrl || '',
+                mimeType: payload.mimeType || '',
                 status: normalizeMessageStatus(payload.status || whatsappMessageStatusById[payload.id || '']?.status),
                 statusTimestamp: payload.statusTimestamp || whatsappMessageStatusById[payload.id || '']?.statusTimestamp || payload.timestamp || new Date().toISOString()
             });
@@ -1020,6 +1145,10 @@ lucide.createIcons();
                             text: m.text || '',
                             timestamp: m.timestamp || new Date().toISOString(),
                             direction: m.direction || 'incoming',
+                            messageType: m.messageType || 'text',
+                            attachmentName: m.attachmentName || '',
+                            attachmentUrl: m.attachmentUrl || '',
+                            mimeType: m.mimeType || '',
                             status: normalizeMessageStatus(m.status || whatsappMessageStatusById[m.id || '']?.status),
                             statusTimestamp: m.statusTimestamp || whatsappMessageStatusById[m.id || '']?.statusTimestamp || m.timestamp || new Date().toISOString()
                         }))
@@ -1138,6 +1267,7 @@ lucide.createIcons();
             initWhatsappRealtime();
             initWhatsappPolling();
             initWhatsappDebugPolling();
+            initWhatsappWindowTimer();
         }
 
         contactItems.forEach((item, index) => {
@@ -1451,56 +1581,146 @@ lucide.createIcons();
         };
         if (chatFileInput) {
             chatFileInput.addEventListener('change', function() {
-                const selectedFiles = Array.from(this.files || []);
-                if (!selectedFiles.length) return;
-                selectedFiles.forEach((file) => appendFileMessage(file));
+                queueAttachments(this.files || []);
                 this.value = '';
             });
         }
-        // Notification Button
-        document.getElementById('notifyBtn').onclick = function() {
-            alert('Notification sent!');
-        };
-        // Send Button
-        document.getElementById('sendBtn').onclick = async function() {
-            const text = (chatInput?.value || '').trim();
-            if (!text) return;
+        async function fileToDataUrl(file) {
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('Failed to read attachment: ' + (file?.name || 'file')));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function sendPendingAttachments(waId) {
+            for (const file of pendingAttachments) {
+                const dataUrl = await fileToDataUrl(file);
+                const res = await whatsappFetch('/api/whatsapp/send-media', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        waId,
+                        fileName: file.name,
+                        mimeType: file.type || 'application/octet-stream',
+                        messageType: detectAttachmentType(file.name, file.type),
+                        dataUrl
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok || !data?.ok) {
+                    throw new Error(data?.error || ('Attachment send failed: ' + file.name));
+                }
+                if (!Array.isArray(whatsappMessagesByContact[waId])) {
+                    whatsappMessagesByContact[waId] = [];
+                }
+                whatsappMessagesByContact[waId].push({
+                    id: data?.id || '',
+                    text: data?.text || file.name,
+                    timestamp: new Date().toISOString(),
+                    direction: 'outgoing',
+                    messageType: data?.messageType || detectAttachmentType(file.name, file.type),
+                    attachmentName: data?.attachmentName || file.name,
+                    attachmentUrl: data?.attachmentUrl || '',
+                    mimeType: data?.mimeType || file.type || 'application/octet-stream',
+                    status: 'sent',
+                    statusTimestamp: new Date().toISOString()
+                });
+            }
+            pendingAttachments = [];
+            renderAttachmentQueue();
+        }
+
+        document.getElementById('notifyBtn').onclick = async function() {
             if (!activeWhatsappWaId) {
                 alert('Select a WhatsApp contact first.');
                 return;
             }
-
             try {
-                const res = await whatsappFetch('/api/whatsapp/send', {
+                const res = await whatsappFetch('/api/whatsapp/initiate', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         waId: normalizeWaId(activeWhatsappWaId),
-                        text: text
+                        contactName: (chatHeaderTitle?.textContent || '').replace(/^Chat with\s+/i, '').trim(),
+                        agentName
                     })
                 });
                 const data = await res.json();
                 if (!res.ok || !data?.ok) {
-                    throw new Error(data?.error || 'Send failed');
+                    throw new Error(data?.error || 'Chat initiation failed');
                 }
                 if (!Array.isArray(whatsappMessagesByContact[activeWhatsappWaId])) {
                     whatsappMessagesByContact[activeWhatsappWaId] = [];
                 }
                 whatsappMessagesByContact[activeWhatsappWaId].push({
                     id: data?.id || '',
-                    text,
+                    text: data?.text || 'Chat initiation template sent',
                     timestamp: new Date().toISOString(),
                     direction: 'outgoing',
+                    messageType: 'template',
                     status: 'sent',
                     statusTimestamp: new Date().toISOString()
                 });
-                if (data?.id) {
-                    whatsappMessageStatusById[data.id] = {
+                renderWhatsappMessages(activeWhatsappWaId);
+                await loadWhatsappContacts();
+            } catch (err) {
+                console.error('Failed to send chat initiation:', err);
+                alert('Chat initiation failed: ' + (err?.message || 'Unknown error'));
+            }
+        };
+        // Send Button
+        document.getElementById('sendBtn').onclick = async function() {
+            const text = (chatInput?.value || '').trim();
+            if (!text && pendingAttachments.length === 0) return;
+            if (!activeWhatsappWaId) {
+                alert('Select a WhatsApp contact first.');
+                return;
+            }
+
+            try {
+                const waId = normalizeWaId(activeWhatsappWaId);
+                if (pendingAttachments.length) {
+                    await sendPendingAttachments(waId);
+                }
+                if (text) {
+                    const res = await whatsappFetch('/api/whatsapp/send', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            waId,
+                            text: text
+                        })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data?.ok) {
+                        throw new Error(data?.error || 'Send failed');
+                    }
+                    if (!Array.isArray(whatsappMessagesByContact[activeWhatsappWaId])) {
+                        whatsappMessagesByContact[activeWhatsappWaId] = [];
+                    }
+                    whatsappMessagesByContact[activeWhatsappWaId].push({
+                        id: data?.id || '',
+                        text,
+                        timestamp: new Date().toISOString(),
+                        direction: 'outgoing',
+                        messageType: 'text',
                         status: 'sent',
                         statusTimestamp: new Date().toISOString()
-                    };
+                    });
+                    if (data?.id) {
+                        whatsappMessageStatusById[data.id] = {
+                            status: 'sent',
+                            statusTimestamp: new Date().toISOString()
+                        };
+                    }
                 }
                 renderWhatsappMessages(activeWhatsappWaId);
                 chatInput.value = '';

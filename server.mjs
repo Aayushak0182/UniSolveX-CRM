@@ -10,13 +10,15 @@ const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const appSecret = process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || '';
 const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
 const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME || '';
+const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 
 app.use(cors());
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(
     express.json({
-        limit: '2mb',
+        limit: '12mb',
         verify: (req, _res, buf, encoding) => {
             req.rawBody = buf.toString(encoding || 'utf8');
         }
@@ -157,6 +159,99 @@ function normalizeIncomingMessage(valueMessage) {
     return '[Unsupported message type]';
 }
 
+function getIncomingMessageType(valueMessage) {
+    return String(valueMessage?.type || 'text').toLowerCase();
+}
+
+function getIncomingAttachmentMeta(valueMessage) {
+    const type = getIncomingMessageType(valueMessage);
+    if (type === 'image') {
+        return {
+            messageType: 'image',
+            attachmentName: valueMessage.image?.caption || 'Image',
+            attachmentUrl: '',
+            mimeType: valueMessage.image?.mime_type || 'image/*'
+        };
+    }
+    if (type === 'document') {
+        return {
+            messageType: 'document',
+            attachmentName: valueMessage.document?.filename || 'Document',
+            attachmentUrl: '',
+            mimeType: valueMessage.document?.mime_type || 'application/octet-stream'
+        };
+    }
+    if (type === 'audio') {
+        return {
+            messageType: 'audio',
+            attachmentName: 'Audio',
+            attachmentUrl: '',
+            mimeType: valueMessage.audio?.mime_type || 'audio/*'
+        };
+    }
+    if (type === 'video') {
+        return {
+            messageType: 'video',
+            attachmentName: valueMessage.video?.caption || 'Video',
+            attachmentUrl: '',
+            mimeType: valueMessage.video?.mime_type || 'video/*'
+        };
+    }
+    return {
+        messageType: 'text',
+        attachmentName: '',
+        attachmentUrl: '',
+        mimeType: ''
+    };
+}
+
+function ensureWhatsappConfig() {
+    if (!whatsappAccessToken || !whatsappPhoneNumberId) {
+        throw new Error('WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID missing');
+    }
+}
+
+async function sendGraphJson(path, payload) {
+    const response = await fetch(`https://graph.facebook.com/v22.0/${path}`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${whatsappAccessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result?.error?.message || 'WhatsApp API request failed');
+    }
+    return result;
+}
+
+async function uploadWhatsappMedia({ fileName, mimeType, dataUrl }) {
+    const match = /^data:([^;]+);base64,(.+)$/i.exec(String(dataUrl || ''));
+    if (!match?.[1] || !match?.[2]) {
+        throw new Error('Attachment must be sent as a valid base64 data URL');
+    }
+    const resolvedMimeType = mimeType || match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('file', new Blob([buffer], { type: resolvedMimeType }), fileName || 'attachment');
+
+    const response = await fetch(`https://graph.facebook.com/v22.0/${whatsappPhoneNumberId}/media`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${whatsappAccessToken}`
+        },
+        body: form
+    });
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result?.error?.message || 'WhatsApp media upload failed');
+    }
+    return result?.id || '';
+}
+
 app.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'whatsapp-webhook', at: new Date().toISOString() });
 });
@@ -212,13 +307,15 @@ app.post('/webhook', (req, res) => {
                 const tsMillis = Number(incomingMessage.timestamp || '0') * 1000;
                 const timestamp = tsMillis > 0 ? new Date(tsMillis).toISOString() : new Date().toISOString();
                 const text = normalizeIncomingMessage(incomingMessage);
+                const attachmentMeta = getIncomingAttachmentMeta(incomingMessage);
 
                 upsertContact(waId, profileName);
                 addMessage(waId, {
                     id: incomingMessage.id || '',
                     direction: 'incoming',
                     text,
-                    timestamp
+                    timestamp,
+                    ...attachmentMeta
                 });
                 pushWebhookEvent({
                     receivedAt,
@@ -238,7 +335,8 @@ app.post('/webhook', (req, res) => {
                         id: incomingMessage.id || '',
                         direction: 'incoming',
                         text,
-                        timestamp
+                        timestamp,
+                        ...attachmentMeta
                     }
                 });
             });
@@ -317,34 +415,15 @@ app.post('/api/whatsapp/send', async (req, res) => {
     if (!waId || !text) {
         return res.status(400).json({ ok: false, error: 'waId and text are required' });
     }
-    if (!whatsappAccessToken || !whatsappPhoneNumberId) {
-        return res.status(500).json({ ok: false, error: 'WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID missing' });
-    }
 
     try {
-        const graphUrl = `https://graph.facebook.com/v22.0/${whatsappPhoneNumberId}/messages`;
-        const response = await fetch(graphUrl, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${whatsappAccessToken}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                messaging_product: 'whatsapp',
-                to: waId,
-                type: 'text',
-                text: { body: text }
-            })
+        ensureWhatsappConfig();
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            type: 'text',
+            text: { body: text }
         });
-
-        const result = await response.json();
-        if (!response.ok) {
-            return res.status(502).json({
-                ok: false,
-                error: result?.error?.message || 'WhatsApp API send failed',
-                details: result
-            });
-        }
 
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
@@ -376,6 +455,150 @@ app.post('/api/whatsapp/send', async (req, res) => {
         return res.json({ ok: true, id: messageId });
     } catch (error) {
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected send error' });
+    }
+});
+
+app.post('/api/whatsapp/send-media', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const fileName = String(req.body?.fileName || '').trim();
+    const mimeType = String(req.body?.mimeType || '').trim();
+    const dataUrl = String(req.body?.dataUrl || '');
+    const requestedType = String(req.body?.messageType || '').trim().toLowerCase();
+
+    if (!waId || !fileName || !dataUrl) {
+        return res.status(400).json({ ok: false, error: 'waId, fileName and dataUrl are required' });
+    }
+
+    try {
+        ensureWhatsappConfig();
+        const messageType = ['image', 'audio', 'video', 'document'].includes(requestedType) ? requestedType : 'document';
+        const mediaId = await uploadWhatsappMedia({ fileName, mimeType, dataUrl });
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            type: messageType,
+            [messageType]: {
+                id: mediaId
+            }
+        });
+
+        const profileName = contactsByWaId.get(waId)?.profileName || waId;
+        const timestamp = new Date().toISOString();
+        const messageId = result?.messages?.[0]?.id || '';
+        const text = `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}] ${fileName}`;
+        upsertContact(waId, profileName);
+        addMessage(waId, {
+            id: messageId,
+            direction: 'outgoing',
+            text,
+            timestamp,
+            messageType,
+            attachmentName: fileName,
+            attachmentUrl: '',
+            mimeType: mimeType || '',
+            status: 'sent',
+            statusTimestamp: timestamp
+        });
+
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                profileName,
+                id: messageId,
+                direction: 'outgoing',
+                text,
+                timestamp,
+                messageType,
+                attachmentName: fileName,
+                attachmentUrl: '',
+                mimeType: mimeType || '',
+                status: 'sent',
+                statusTimestamp: timestamp
+            }
+        });
+
+        return res.json({
+            ok: true,
+            id: messageId,
+            text,
+            messageType,
+            attachmentName: fileName,
+            attachmentUrl: '',
+            mimeType: mimeType || ''
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Unexpected media send error' });
+    }
+});
+
+app.post('/api/whatsapp/initiate', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const contactName = String(req.body?.contactName || '').trim() || 'there';
+
+    if (!waId) {
+        return res.status(400).json({ ok: false, error: 'waId is required' });
+    }
+    if (!whatsappInitiationTemplateName) {
+        return res.status(400).json({ ok: false, error: 'WHATSAPP_INIT_TEMPLATE_NAME is not configured on the backend' });
+    }
+
+    try {
+        ensureWhatsappConfig();
+        const components = contactName
+            ? [{
+                type: 'body',
+                parameters: [
+                    { type: 'text', text: contactName }
+                ]
+            }]
+            : [];
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            type: 'template',
+            template: {
+                name: whatsappInitiationTemplateName,
+                language: {
+                    code: whatsappInitiationTemplateLanguage
+                },
+                ...(components.length ? { components } : {})
+            }
+        });
+
+        const profileName = contactsByWaId.get(waId)?.profileName || waId;
+        const timestamp = new Date().toISOString();
+        const messageId = result?.messages?.[0]?.id || '';
+        const text = `Chat initiation template sent (${whatsappInitiationTemplateName})`;
+        upsertContact(waId, profileName);
+        addMessage(waId, {
+            id: messageId,
+            direction: 'outgoing',
+            text,
+            timestamp,
+            messageType: 'template',
+            status: 'sent',
+            statusTimestamp: timestamp
+        });
+
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                profileName,
+                id: messageId,
+                direction: 'outgoing',
+                text,
+                timestamp,
+                messageType: 'template',
+                status: 'sent',
+                statusTimestamp: timestamp
+            }
+        });
+
+        return res.json({ ok: true, id: messageId, text });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Unexpected initiation error' });
     }
 });
 
