@@ -780,7 +780,7 @@ lucide.createIcons();
             const state = getWhatsappWindowState(whatsappMessagesByContact[waId] || []);
             const isOpen = state.state === 'open';
             const isExpired = state.state === 'expired';
-            chatHeaderStatus.innerHTML = `<span class="w-2 h-2 rounded-full ${isOpen ? 'bg-green-500' : isExpired ? 'bg-red-500' : 'bg-amber-400'}"></span> ${isOpen ? 'WhatsApp Connected' : isExpired ? '24h Window Closed' : 'Waiting for first client message'}`;
+            chatHeaderStatus.innerHTML = `<span class="w-2 h-2 rounded-full ${isOpen ? 'bg-green-500' : isExpired ? 'bg-red-500' : 'bg-amber-400'}"></span> WhatsApp Connected`;
             chatHeaderStatus.classList.remove('text-green-600', 'text-red-600', 'text-amber-700');
             chatHeaderStatus.classList.add(isOpen ? 'text-green-600' : isExpired ? 'text-red-600' : 'text-amber-700');
             chatWindowTimerEl.textContent = isOpen ? state.shortLabel.replace(' left', '') : isExpired ? 'EXPIRED' : '--:--:--';
@@ -1594,8 +1594,10 @@ lucide.createIcons();
             });
         }
 
-        async function sendPendingAttachments(waId) {
+        async function sendPendingAttachments(waId, captionText) {
+            const normalizedCaption = String(captionText || '').trim();
             for (const file of pendingAttachments) {
+                const messageType = detectAttachmentType(file.name, file.type);
                 const dataUrl = await fileToDataUrl(file);
                 const res = await whatsappFetch('/api/whatsapp/send-media', {
                     method: 'POST',
@@ -1606,7 +1608,8 @@ lucide.createIcons();
                         waId,
                         fileName: file.name,
                         mimeType: file.type || 'application/octet-stream',
-                        messageType: detectAttachmentType(file.name, file.type),
+                        messageType,
+                        caption: normalizedCaption,
                         dataUrl
                     })
                 });
@@ -1619,10 +1622,10 @@ lucide.createIcons();
                 }
                 whatsappMessagesByContact[waId].push({
                     id: data?.id || '',
-                    text: data?.text || file.name,
+                    text: data?.text || normalizedCaption || file.name,
                     timestamp: new Date().toISOString(),
                     direction: 'outgoing',
-                    messageType: data?.messageType || detectAttachmentType(file.name, file.type),
+                    messageType: data?.messageType || messageType,
                     attachmentName: data?.attachmentName || file.name,
                     attachmentUrl: data?.attachmentUrl || '',
                     mimeType: data?.mimeType || file.type || 'application/octet-stream',
@@ -1686,9 +1689,9 @@ lucide.createIcons();
             try {
                 const waId = normalizeWaId(activeWhatsappWaId);
                 if (pendingAttachments.length) {
-                    await sendPendingAttachments(waId);
+                    await sendPendingAttachments(waId, text);
                 }
-                if (text) {
+                if (text && pendingAttachments.length === 0) {
                     const res = await whatsappFetch('/api/whatsapp/send', {
                         method: 'POST',
                         headers: {

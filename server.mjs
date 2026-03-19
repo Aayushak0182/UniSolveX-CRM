@@ -464,6 +464,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
     const mimeType = String(req.body?.mimeType || '').trim();
     const dataUrl = String(req.body?.dataUrl || '');
     const requestedType = String(req.body?.messageType || '').trim().toLowerCase();
+    const caption = String(req.body?.caption || '').trim();
 
     if (!waId || !fileName || !dataUrl) {
         return res.status(400).json({ ok: false, error: 'waId, fileName and dataUrl are required' });
@@ -473,19 +474,26 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
         ensureWhatsappConfig();
         const messageType = ['image', 'audio', 'video', 'document'].includes(requestedType) ? requestedType : 'document';
         const mediaId = await uploadWhatsappMedia({ fileName, mimeType, dataUrl });
+        const mediaPayload = {
+            id: mediaId
+        };
+        if (caption && (messageType === 'image' || messageType === 'video' || messageType === 'document')) {
+            mediaPayload.caption = caption;
+            if (messageType === 'document') {
+                mediaPayload.filename = fileName;
+            }
+        }
         const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
             messaging_product: 'whatsapp',
             to: waId,
             type: messageType,
-            [messageType]: {
-                id: mediaId
-            }
+            [messageType]: mediaPayload
         });
 
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
-        const text = `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}] ${fileName}`;
+        const text = caption || `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}] ${fileName}`;
         upsertContact(waId, profileName);
         addMessage(waId, {
             id: messageId,
