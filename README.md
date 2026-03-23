@@ -78,3 +78,26 @@ This repo includes `render.yaml` for backend deployment on Render.
 
 - Current storage is in-memory (resets on server restart).
 - If required, add DB persistence (MongoDB/PostgreSQL) in `backend/server.mjs`.
+
+## Persistent chat storage
+
+The root `server.mjs` now supports persistent WhatsApp chat storage with Firebase Admin.
+
+Set these env vars on the backend service:
+
+```env
+FIREBASE_SERVICE_ACCOUNT_JSON=...json...
+# or
+FIREBASE_SERVICE_ACCOUNT_BASE64=...base64-json...
+FIREBASE_STORAGE_BUCKET=your-project-id.firebasestorage.app
+WHATSAPP_MEDIA_STORAGE_PREFIX=whatsapp-media
+```
+
+What this does:
+
+- Stores contacts in Firestore
+- Stores all message history in Firestore
+- Removes the old in-memory 250-message trim
+- If `FIREBASE_STORAGE_BUCKET` is configured, outgoing media and incoming media backups are uploaded and their URLs are stored with the message
+
+Without Firebase envs, the app falls back to in-memory storage only.

@@ -406,12 +406,13 @@ lucide.createIcons();
             const searchValue = (contactSearch.value || '').trim().toLowerCase();
             contactItems.forEach((item) => {
                 const itemTag = item.dataset.tag || '';
+                const isArchived = itemTag === 'archived';
                 const nameText = (item.querySelector('.contact-name')?.textContent || '').toLowerCase();
                 const contactIdText = (item.dataset.contactId || '').trim().toLowerCase();
                 const idText = (item.querySelector('.contact-meta')?.textContent || item.querySelector('p')?.textContent || '').toLowerCase();
                 const matchesTag = !filterValue || itemTag === filterValue;
                 const matchesSearch = !searchValue || nameText.includes(searchValue) || contactIdText.includes(searchValue) || idText.includes(searchValue);
-                item.style.display = matchesTag && matchesSearch ? '' : 'none';
+                item.style.display = !isArchived && matchesTag && matchesSearch ? '' : 'none';
             });
         }
 
@@ -1125,6 +1126,7 @@ lucide.createIcons();
                 const incoming = msg.direction === 'incoming';
                 const statusTick = incoming ? '' : getStatusTickHtml(msg.status);
                 const messageType = msg.messageType || 'text';
+                const isTemplateMessage = String(messageType).toLowerCase() === 'template';
                 const attachmentName = escapeHtml(msg.attachmentName || '');
                 const attachmentUrl = String(msg.attachmentUrl || '').trim();
                 const replyQuote = msg.replyTo?.id
@@ -1144,7 +1146,17 @@ lucide.createIcons();
                             ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
                         </div>
                     `
+                    : isTemplateMessage
+                        ? `
+                            <div class="chat-template-body">
+                                <p class="chat-template-label">Template Message</p>
+                                <p class="chat-template-text">${escapeHtml(msg.text || '[Template message]')}</p>
+                            </div>
+                        `
                     : escapeHtml(msg.text || '[Unsupported message type]');
+                const bubbleClass = isTemplateMessage
+                    ? 'chat-bubble-template p-2.5 shadow-sm text-sm text-gray-800'
+                    : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800`;
                 wrap.className = 'flex flex-col ' + (incoming ? 'items-start' : 'items-end');
                 wrap.innerHTML = `
                         <div class="chat-message-row">
@@ -1156,7 +1168,7 @@ lucide.createIcons();
                                 <button type="button" data-action="forward" data-message-key="${escapeHtml(clientKey)}">Forward</button>
                             </div>
                         ` : ''}
-                        <div class="${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800">
+                        <div class="${bubbleClass}">
                             ${replyQuote}
                             ${bubbleBody}
                         </div>
@@ -1215,6 +1227,7 @@ lucide.createIcons();
                             <option value="tutor">Tutor</option>
                             <option value="friend">Client's Friend</option>
                             <option value="useless">Useless/Broker</option>
+                            <option value="archived">Archive / Block</option>
                         </select>
                     </div>
                     <p class="contact-meta text-xs text-gray-500">ID: ${escapeHtml(contactId)}</p>

@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
+import admin from 'firebase-admin';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -14,6 +15,10 @@ const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME |
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
 const whatsappInitiationTemplatePreviewText = process.env.WHATSAPP_INIT_TEMPLATE_PREVIEW_TEXT || 'Hello 👋,\n\nThis is UniSolvex team. We would like to start a conversation with you.\n\nPlease reply to this message so we can talk.\n\nThank you!';
+const firebaseServiceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const firebaseServiceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '';
+const firebaseStorageBucketName = process.env.FIREBASE_STORAGE_BUCKET || '';
+const whatsappMediaStoragePrefix = process.env.WHATSAPP_MEDIA_STORAGE_PREFIX || 'whatsapp-media';
 
 app.use(cors());
 app.disable('x-powered-by');
@@ -34,7 +39,261 @@ const sockets = new Set();
 const webhookEvents = [];
 const apiEvents = [];
 
+let firebaseDb = null;
+let firebaseBucket = null;
+let firebasePersistenceInitError = '';
+let firebasePersistenceEnabled = false;
+
 let loggedMissingAppSecret = false;
+let loggedMissingFirebasePersistence = false;
+
+function parseFirebaseServiceAccount() {
+    try {
+        if (firebaseServiceAccountJson) {
+            return JSON.parse(firebaseServiceAccountJson);
+        }
+        if (firebaseServiceAccountBase64) {
+            return JSON.parse(Buffer.from(firebaseServiceAccountBase64, 'base64').toString('utf8'));
+        }
+    } catch (error) {
+        firebasePersistenceInitError = error?.message || 'Invalid Firebase service account JSON';
+    }
+    return null;
+}
+
+function initFirebasePersistence() {
+    if (firebasePersistenceEnabled || firebaseDb) return true;
+    try {
+        const serviceAccount = parseFirebaseServiceAccount();
+        if (!serviceAccount && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+            return false;
+        }
+        if (!admin.apps.length) {
+            const options = {
+                ...(firebaseStorageBucketName ? { storageBucket: firebaseStorageBucketName } : {})
+            };
+            if (serviceAccount) {
+                options.credential = admin.credential.cert(serviceAccount);
+            }
+            admin.initializeApp(options);
+        }
+        firebaseDb = admin.firestore();
+        firebaseBucket = firebaseStorageBucketName ? admin.storage().bucket(firebaseStorageBucketName) : null;
+        firebasePersistenceEnabled = true;
+        return true;
+    } catch (error) {
+        firebasePersistenceInitError = error?.message || 'Firebase persistence init failed';
+        return false;
+    }
+}
+
+function warnMissingFirebasePersistenceOnce() {
+    if (loggedMissingFirebasePersistence) return;
+    loggedMissingFirebasePersistence = true;
+    console.warn('[storage] Firebase persistence is not configured. Chat history will remain in-memory only.');
+}
+
+function getPersistentMessageDocId(waId, message) {
+    const normalizedWaId = normalizeWaId(waId);
+    const messageId = String(message?.id || '').trim();
+    const seed = messageId
+        ? `${normalizedWaId}|${messageId}`
+        : [
+            normalizedWaId,
+            String(message?.direction || ''),
+            String(message?.timestamp || ''),
+            String(message?.messageType || ''),
+            String(message?.text || ''),
+            String(message?.attachmentName || ''),
+            String(message?.mediaId || ''),
+            String(message?.replyTo?.id || '')
+        ].join('|');
+    return crypto.createHash('sha1').update(seed).digest('hex');
+}
+
+function inferFileExtension(mimeType, fallbackName) {
+    const lowerMime = String(mimeType || '').toLowerCase();
+    if (/\.(\w+)$/.test(String(fallbackName || ''))) {
+        return String(fallbackName).split('.').pop();
+    }
+    if (lowerMime.includes('jpeg')) return 'jpg';
+    if (lowerMime.includes('png')) return 'png';
+    if (lowerMime.includes('gif')) return 'gif';
+    if (lowerMime.includes('webp')) return 'webp';
+    if (lowerMime.includes('pdf')) return 'pdf';
+    if (lowerMime.includes('mpeg')) return 'mp3';
+    if (lowerMime.includes('ogg')) return 'ogg';
+    if (lowerMime.includes('mp4')) return 'mp4';
+    if (lowerMime.includes('quicktime')) return 'mov';
+    if (lowerMime.includes('plain')) return 'txt';
+    return 'bin';
+}
+
+function sanitizeFileSegment(value) {
+    return String(value || '')
+        .replace(/[^\w.-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80) || 'attachment';
+}
+
+function parseDataUrl(dataUrl) {
+    const match = /^data:([^;]+);base64,(.+)$/i.exec(String(dataUrl || ''));
+    if (!match?.[1] || !match?.[2]) {
+        throw new Error('Attachment must be sent as a valid base64 data URL');
+    }
+    return {
+        mimeType: match[1],
+        buffer: Buffer.from(match[2], 'base64')
+    };
+}
+
+async function uploadMediaBufferToFirebaseStorage({ waId, messageId, timestamp, fileName, mimeType, buffer }) {
+    if (!initFirebasePersistence() || !firebaseBucket || !buffer?.length) return '';
+    const safeWaId = normalizeWaId(waId) || 'unknown';
+    const safeName = sanitizeFileSegment(fileName || `media_${messageId || Date.now()}.${inferFileExtension(mimeType, fileName)}`);
+    const ts = String(timestamp || new Date().toISOString()).replace(/[:.]/g, '-');
+    const objectPath = `${whatsappMediaStoragePrefix}/${safeWaId}/${ts}_${safeName}`;
+    const file = firebaseBucket.file(objectPath);
+    await file.save(buffer, {
+        resumable: false,
+        metadata: {
+            contentType: mimeType || 'application/octet-stream',
+            cacheControl: 'private, max-age=31536000'
+        }
+    });
+    const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: '2035-01-01'
+    });
+    return signedUrl;
+}
+
+async function fetchWhatsappMediaBuffer(mediaId) {
+    ensureWhatsappConfig();
+    const metaResponse = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
+        headers: {
+            Authorization: `Bearer ${whatsappAccessToken}`
+        }
+    });
+    const meta = await metaResponse.json();
+    if (!metaResponse.ok || !meta?.url) {
+        throw new Error(meta?.error?.message || 'Failed to resolve WhatsApp media URL');
+    }
+    const downloadResponse = await fetch(meta.url, {
+        headers: {
+            Authorization: `Bearer ${whatsappAccessToken}`
+        }
+    });
+    if (!downloadResponse.ok) {
+        throw new Error('Failed to download WhatsApp media');
+    }
+    const arrayBuffer = await downloadResponse.arrayBuffer();
+    return {
+        buffer: Buffer.from(arrayBuffer),
+        mimeType: meta.mime_type || downloadResponse.headers.get('content-type') || 'application/octet-stream'
+    };
+}
+
+async function backupIncomingMediaToStorage({ waId, messageId, timestamp, attachmentName, mediaId, mimeType }) {
+    if (!mediaId) return '';
+    try {
+        const { buffer, mimeType: resolvedMimeType } = await fetchWhatsappMediaBuffer(mediaId);
+        const fileName = attachmentName && attachmentName !== 'Image' && attachmentName !== 'Video' && attachmentName !== 'Audio' && attachmentName !== 'Document'
+            ? attachmentName
+            : `media_${mediaId}.${inferFileExtension(mimeType || resolvedMimeType, attachmentName)}`;
+        return await uploadMediaBufferToFirebaseStorage({
+            waId,
+            messageId,
+            timestamp,
+            fileName,
+            mimeType: mimeType || resolvedMimeType,
+            buffer
+        });
+    } catch (error) {
+        console.warn('[storage] Failed to back up incoming media:', error?.message || error);
+        return '';
+    }
+}
+
+async function persistContactSnapshot(contact) {
+    if (!contact?.waId) return;
+    if (!initFirebasePersistence()) {
+        warnMissingFirebasePersistenceOnce();
+        return;
+    }
+    await firebaseDb.collection('wa_contacts').doc(String(contact.waId)).set({
+        waId: String(contact.waId),
+        profileName: String(contact.profileName || contact.waId),
+        updatedAt: String(contact.updatedAt || new Date().toISOString())
+    }, { merge: true });
+}
+
+async function persistMessageSnapshot(waId, message) {
+    if (!waId || !message) return '';
+    if (!initFirebasePersistence()) {
+        warnMissingFirebasePersistenceOnce();
+        return '';
+    }
+    const docId = getPersistentMessageDocId(waId, message);
+    await firebaseDb.collection('wa_messages').doc(docId).set({
+        ...message,
+        waId: normalizeWaId(waId),
+        docId,
+        updatedAt: new Date().toISOString()
+    }, { merge: true });
+    return docId;
+}
+
+async function persistMessageStatusSnapshot(waId, messageId, status, statusTimestamp) {
+    if (!waId || !messageId || !status) return;
+    if (!initFirebasePersistence()) {
+        warnMissingFirebasePersistenceOnce();
+        return;
+    }
+    const docId = getPersistentMessageDocId(waId, { id: messageId });
+    await firebaseDb.collection('wa_messages').doc(docId).set({
+        waId: normalizeWaId(waId),
+        id: messageId,
+        status,
+        statusTimestamp: statusTimestamp || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }, { merge: true });
+}
+
+async function loadPersistedStateIntoMemory() {
+    if (!initFirebasePersistence()) return;
+    const contactsSnapshot = await firebaseDb.collection('wa_contacts').get();
+    contactsSnapshot.forEach((doc) => {
+        const data = doc.data() || {};
+        if (!data.waId) return;
+        contactsByWaId.set(String(data.waId), {
+            waId: String(data.waId),
+            profileName: String(data.profileName || data.waId),
+            updatedAt: String(data.updatedAt || new Date().toISOString())
+        });
+    });
+
+    const messagesSnapshot = await firebaseDb.collection('wa_messages').orderBy('timestamp', 'asc').get();
+    messagesSnapshot.forEach((doc) => {
+        const data = doc.data() || {};
+        const waId = normalizeWaId(data.waId || '');
+        if (!waId) return;
+        addMessage(waId, {
+            id: String(data.id || ''),
+            text: String(data.text || ''),
+            timestamp: String(data.timestamp || new Date().toISOString()),
+            direction: String(data.direction || 'incoming'),
+            messageType: String(data.messageType || 'text'),
+            attachmentName: String(data.attachmentName || ''),
+            attachmentUrl: String(data.attachmentUrl || ''),
+            mediaId: String(data.mediaId || ''),
+            mimeType: String(data.mimeType || ''),
+            replyTo: data.replyTo || null,
+            status: String(data.status || ''),
+            statusTimestamp: String(data.statusTimestamp || data.timestamp || new Date().toISOString())
+        });
+    });
+}
 
 function safeTimingCompareHex(expectedHex, actualHex) {
     const expected = Buffer.from(String(expectedHex || ''), 'utf8');
@@ -114,9 +373,6 @@ function addMessage(waId, message) {
     }
     const existing = messagesByWaId.get(waId) || [];
     existing.push(message);
-    if (existing.length > 250) {
-        existing.splice(0, existing.length - 250);
-    }
     messagesByWaId.set(waId, existing);
 }
 
@@ -416,14 +672,37 @@ app.post('/webhook', (req, res) => {
                 const attachmentMeta = getIncomingAttachmentMeta(incomingMessage);
                 const replyTo = makeReplyReference(waId, incomingMessage.context?.id || '');
 
-                upsertContact(waId, profileName);
-                addMessage(waId, {
+                const contact = upsertContact(waId, profileName);
+                const storedMessage = {
                     id: incomingMessage.id || '',
                     direction: 'incoming',
                     text,
                     timestamp,
                     ...attachmentMeta,
                     replyTo
+                };
+                addMessage(waId, storedMessage);
+                void persistContactSnapshot(contact).catch((error) => {
+                    console.warn('[storage] Failed to persist contact:', error?.message || error);
+                });
+                if (storedMessage.mediaId) {
+                    void backupIncomingMediaToStorage({
+                        waId,
+                        messageId: storedMessage.id,
+                        timestamp,
+                        attachmentName: storedMessage.attachmentName,
+                        mediaId: storedMessage.mediaId,
+                        mimeType: storedMessage.mimeType
+                    }).then((attachmentUrl) => {
+                        if (!attachmentUrl) return;
+                        storedMessage.attachmentUrl = attachmentUrl;
+                        return persistMessageSnapshot(waId, storedMessage);
+                    }).catch((error) => {
+                        console.warn('[storage] Failed to persist incoming media backup:', error?.message || error);
+                    });
+                }
+                void persistMessageSnapshot(waId, storedMessage).catch((error) => {
+                    console.warn('[storage] Failed to persist message:', error?.message || error);
                 });
                 pushWebhookEvent({
                     receivedAt,
@@ -459,6 +738,9 @@ app.post('/webhook', (req, res) => {
                 if (!waId || !messageId || !status) return;
 
                 updateMessageStatus(waId, messageId, status, statusTimestamp);
+                void persistMessageStatusSnapshot(waId, messageId, status, statusTimestamp).catch((error) => {
+                    console.warn('[storage] Failed to persist message status:', error?.message || error);
+                });
                 pushWebhookEvent({
                     receivedAt,
                     object: body?.object || '',
@@ -574,8 +856,8 @@ app.post('/api/whatsapp/send', async (req, res) => {
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
         const replyTo = makeReplyReference(waId, contextMessageId);
-        upsertContact(waId, profileName);
-        addMessage(waId, {
+        const contact = upsertContact(waId, profileName);
+        const storedMessage = {
             id: messageId,
             direction: 'outgoing',
             text,
@@ -583,7 +865,10 @@ app.post('/api/whatsapp/send', async (req, res) => {
             replyTo,
             status: 'sent',
             statusTimestamp: timestamp
-        });
+        };
+        addMessage(waId, storedMessage);
+        await persistContactSnapshot(contact);
+        await persistMessageSnapshot(waId, storedMessage);
         pushApiEvent({
             at: timestamp,
             route: 'send',
@@ -670,21 +955,38 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
         const messageId = result?.messages?.[0]?.id || '';
         const text = caption || `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}] ${fileName}`;
         const replyTo = makeReplyReference(waId, contextMessageId);
-        upsertContact(waId, profileName);
-        addMessage(waId, {
+        let attachmentUrl = '';
+        try {
+            const parsed = parseDataUrl(dataUrl);
+            attachmentUrl = await uploadMediaBufferToFirebaseStorage({
+                waId,
+                messageId,
+                timestamp,
+                fileName,
+                mimeType: mimeType || parsed.mimeType,
+                buffer: parsed.buffer
+            });
+        } catch (storageError) {
+            console.warn('[storage] Failed to back up outgoing media:', storageError?.message || storageError);
+        }
+        const contact = upsertContact(waId, profileName);
+        const storedMessage = {
             id: messageId,
             direction: 'outgoing',
             text,
             timestamp,
             messageType,
             attachmentName: fileName,
-            attachmentUrl: '',
+            attachmentUrl,
             mediaId,
             mimeType: mimeType || '',
             replyTo,
             status: 'sent',
             statusTimestamp: timestamp
-        });
+        };
+        addMessage(waId, storedMessage);
+        await persistContactSnapshot(contact);
+        await persistMessageSnapshot(waId, storedMessage);
         pushApiEvent({
             at: timestamp,
             route: 'send-media',
@@ -707,7 +1009,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
                 timestamp,
                 messageType,
                 attachmentName: fileName,
-                attachmentUrl: '',
+                attachmentUrl,
                 mediaId,
                 mimeType: mimeType || '',
                 replyTo,
@@ -722,7 +1024,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
             text,
             messageType,
             attachmentName: fileName,
-            attachmentUrl: '',
+            attachmentUrl,
             mediaId,
             mimeType: mimeType || ''
         });
@@ -803,8 +1105,8 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
         const text = previewText || `Chat initiation template sent (${whatsappInitiationTemplateName})`;
-        upsertContact(waId, profileName);
-        addMessage(waId, {
+        const contact = upsertContact(waId, profileName);
+        const storedMessage = {
             id: messageId,
             direction: 'outgoing',
             text,
@@ -812,7 +1114,10 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             messageType: 'template',
             status: 'sent',
             statusTimestamp: timestamp
-        });
+        };
+        addMessage(waId, storedMessage);
+        await persistContactSnapshot(contact);
+        await persistMessageSnapshot(waId, storedMessage);
         pushApiEvent({
             at: timestamp,
             route: 'initiate',
@@ -891,7 +1196,7 @@ app.post('/api/whatsapp/forward', async (req, res) => {
                 });
                 const messageId = result?.messages?.[0]?.id || '';
                 const timestamp = new Date().toISOString();
-                addMessage(targetWaId, {
+                const storedMessage = {
                     id: messageId,
                     direction: 'outgoing',
                     text: text || '(forwarded message)',
@@ -899,7 +1204,9 @@ app.post('/api/whatsapp/forward', async (req, res) => {
                     messageType: 'text',
                     status: 'sent',
                     statusTimestamp: timestamp
-                });
+                };
+                addMessage(targetWaId, storedMessage);
+                await persistMessageSnapshot(targetWaId, storedMessage);
                 forwardedIds.push(messageId);
                 continue;
             }
@@ -923,28 +1230,47 @@ app.post('/api/whatsapp/forward', async (req, res) => {
             });
             const messageId = result?.messages?.[0]?.id || '';
             const timestamp = new Date().toISOString();
-            addMessage(targetWaId, {
+            const storedMessage = {
                 id: messageId,
                 direction: 'outgoing',
                 text: text || `[${messageType}] ${message?.attachmentName || ''}`.trim(),
                 timestamp,
                 messageType,
                 attachmentName: String(message?.attachmentName || ''),
-                attachmentUrl: '',
+                attachmentUrl: String(message?.attachmentUrl || ''),
                 mediaId,
                 mimeType: String(message?.mimeType || ''),
                 status: 'sent',
                 statusTimestamp: timestamp
-            });
+            };
+            addMessage(targetWaId, storedMessage);
+            await persistMessageSnapshot(targetWaId, storedMessage);
             forwardedIds.push(messageId);
         }
 
-        upsertContact(targetWaId, profileName);
+        const contact = upsertContact(targetWaId, profileName);
+        await persistContactSnapshot(contact);
         return res.json({ ok: true, forwarded: forwardedIds.length, ids: forwardedIds });
     } catch (error) {
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected forward error' });
     }
 });
+
+try {
+    if (initFirebasePersistence()) {
+        await loadPersistedStateIntoMemory();
+        console.log('[storage] Firebase persistence enabled.');
+        if (firebaseBucket) {
+            console.log('[storage] Media backup bucket:', firebaseBucket.name);
+        }
+    } else if (firebasePersistenceInitError) {
+        console.warn('[storage] Firebase persistence disabled:', firebasePersistenceInitError);
+    } else {
+        console.warn('[storage] Firebase persistence not configured; using in-memory storage only.');
+    }
+} catch (error) {
+    console.warn('[storage] Failed to load persisted chat state:', error?.message || error);
+}
 
 const server = app.listen(port, () => {
     console.log(`WhatsApp webhook server running on http://localhost:${port}`);
