@@ -12,6 +12,7 @@ const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
 const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME || '';
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
+const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
 
 app.use(cors());
 app.disable('x-powered-by');
@@ -30,6 +31,7 @@ const messagesByWaId = new Map();
 const messageStatusById = new Map();
 const sockets = new Set();
 const webhookEvents = [];
+const apiEvents = [];
 
 let loggedMissingAppSecret = false;
 
@@ -77,6 +79,11 @@ function pushWebhookEvent(event) {
     if (webhookEvents.length > 100) webhookEvents.pop();
 }
 
+function pushApiEvent(event) {
+    apiEvents.unshift(event);
+    if (apiEvents.length > 100) apiEvents.pop();
+}
+
 function normalizeWaId(value) {
     return String(value || '').replace(/[^\d]/g, '');
 }
@@ -110,6 +117,29 @@ function addMessage(waId, message) {
         existing.splice(0, existing.length - 250);
     }
     messagesByWaId.set(waId, existing);
+}
+
+function findMessageById(waId, messageId) {
+    if (!waId || !messageId) return null;
+    const rows = messagesByWaId.get(waId) || [];
+    return rows.find((message) => message?.id === messageId) || null;
+}
+
+function makeReplyReference(waId, contextMessageId) {
+    if (!contextMessageId) return null;
+    const message = findMessageById(waId, contextMessageId);
+    if (!message) {
+        return {
+            id: contextMessageId,
+            text: '(message)',
+            direction: 'incoming'
+        };
+    }
+    return {
+        id: contextMessageId,
+        text: message.text || message.attachmentName || '(message)',
+        direction: message.direction || 'incoming'
+    };
 }
 
 function updateMessageStatus(waId, messageId, status, statusTimestamp) {
@@ -170,7 +200,8 @@ function getIncomingAttachmentMeta(valueMessage) {
             messageType: 'image',
             attachmentName: valueMessage.image?.caption || 'Image',
             attachmentUrl: '',
-            mimeType: valueMessage.image?.mime_type || 'image/*'
+            mimeType: valueMessage.image?.mime_type || 'image/*',
+            mediaId: valueMessage.image?.id || ''
         };
     }
     if (type === 'document') {
@@ -178,7 +209,8 @@ function getIncomingAttachmentMeta(valueMessage) {
             messageType: 'document',
             attachmentName: valueMessage.document?.filename || 'Document',
             attachmentUrl: '',
-            mimeType: valueMessage.document?.mime_type || 'application/octet-stream'
+            mimeType: valueMessage.document?.mime_type || 'application/octet-stream',
+            mediaId: valueMessage.document?.id || ''
         };
     }
     if (type === 'audio') {
@@ -186,7 +218,8 @@ function getIncomingAttachmentMeta(valueMessage) {
             messageType: 'audio',
             attachmentName: 'Audio',
             attachmentUrl: '',
-            mimeType: valueMessage.audio?.mime_type || 'audio/*'
+            mimeType: valueMessage.audio?.mime_type || 'audio/*',
+            mediaId: valueMessage.audio?.id || ''
         };
     }
     if (type === 'video') {
@@ -194,14 +227,16 @@ function getIncomingAttachmentMeta(valueMessage) {
             messageType: 'video',
             attachmentName: valueMessage.video?.caption || 'Video',
             attachmentUrl: '',
-            mimeType: valueMessage.video?.mime_type || 'video/*'
+            mimeType: valueMessage.video?.mime_type || 'video/*',
+            mediaId: valueMessage.video?.id || ''
         };
     }
     return {
         messageType: 'text',
         attachmentName: '',
         attachmentUrl: '',
-        mimeType: ''
+        mimeType: '',
+        mediaId: ''
     };
 }
 
@@ -225,6 +260,67 @@ async function sendGraphJson(path, payload) {
         throw new Error(result?.error?.message || 'WhatsApp API request failed');
     }
     return result;
+}
+
+function getGraphErrorCode(error) {
+    const message = String(error?.message || '');
+    const match = /\(#(\d+)\)/.exec(message);
+    return match?.[1] || '';
+}
+
+function normalizeTemplateParamKey(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (!key || key === 'none') return '';
+    if (key === 'contact' || key === 'contactname' || key === 'name') return 'contactName';
+    if (key === 'agent' || key === 'agentname') return 'agentName';
+    return '';
+}
+
+function buildTemplateComponentsFromValues(paramKeys, valuesByKey) {
+    if (!Array.isArray(paramKeys) || !paramKeys.length) return [];
+    return [{
+        type: 'body',
+        parameters: paramKeys.map((key) => ({
+            type: 'text',
+            text: String(valuesByKey[key] || '').trim()
+        }))
+    }];
+}
+
+function getInitiationTemplateParamAttempts(contactName, agentName) {
+    const valuesByKey = {
+        contactName: String(contactName || '').trim() || 'there',
+        agentName: String(agentName || '').trim() || 'our team'
+    };
+
+    if (typeof whatsappInitiationTemplateParamOrder === 'string') {
+        const configuredKeys = whatsappInitiationTemplateParamOrder
+            .split(',')
+            .map((item) => normalizeTemplateParamKey(item))
+            .filter(Boolean);
+        return [{
+            label: configuredKeys.length ? configuredKeys.join(',') : 'none',
+            components: buildTemplateComponentsFromValues(configuredKeys, valuesByKey)
+        }];
+    }
+
+    const candidates = [
+        [],
+        ['contactName'],
+        ['agentName'],
+        ['contactName', 'agentName']
+    ];
+    const seen = new Set();
+    return candidates
+        .map((keys) => ({
+            label: keys.length ? keys.join(',') : 'none',
+            components: buildTemplateComponentsFromValues(keys, valuesByKey)
+        }))
+        .filter((attempt) => {
+            if (seen.has(attempt.label)) return false;
+            seen.add(attempt.label);
+            return true;
+        });
 }
 
 async function uploadWhatsappMedia({ fileName, mimeType, dataUrl }) {
@@ -308,6 +404,7 @@ app.post('/webhook', (req, res) => {
                 const timestamp = tsMillis > 0 ? new Date(tsMillis).toISOString() : new Date().toISOString();
                 const text = normalizeIncomingMessage(incomingMessage);
                 const attachmentMeta = getIncomingAttachmentMeta(incomingMessage);
+                const replyTo = makeReplyReference(waId, incomingMessage.context?.id || '');
 
                 upsertContact(waId, profileName);
                 addMessage(waId, {
@@ -315,7 +412,8 @@ app.post('/webhook', (req, res) => {
                     direction: 'incoming',
                     text,
                     timestamp,
-                    ...attachmentMeta
+                    ...attachmentMeta,
+                    replyTo
                 });
                 pushWebhookEvent({
                     receivedAt,
@@ -336,7 +434,8 @@ app.post('/webhook', (req, res) => {
                         direction: 'incoming',
                         text,
                         timestamp,
-                        ...attachmentMeta
+                        ...attachmentMeta,
+                        replyTo
                     }
                 });
             });
@@ -376,11 +475,37 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/api/whatsapp/debug', (_req, res) => {
+    const recentThreads = Array.from(messagesByWaId.entries())
+        .map(([waId, rows]) => {
+            const messages = Array.isArray(rows) ? rows : [];
+            const lastMessage = messages[messages.length - 1] || null;
+            return {
+                waId,
+                count: messages.length,
+                lastMessage: lastMessage ? {
+                    id: lastMessage.id || '',
+                    direction: lastMessage.direction || '',
+                    text: lastMessage.text || '',
+                    timestamp: lastMessage.timestamp || '',
+                    status: lastMessage.status || '',
+                    statusTimestamp: lastMessage.statusTimestamp || ''
+                } : null
+            };
+        })
+        .sort((a, b) => {
+            const aTs = new Date(a.lastMessage?.timestamp || 0).getTime();
+            const bTs = new Date(b.lastMessage?.timestamp || 0).getTime();
+            return bTs - aTs;
+        })
+        .slice(0, 20);
+
     res.json({
         ok: true,
         contacts: contactsByWaId.size,
         messageThreads: messagesByWaId.size,
-        recentWebhookEvents: webhookEvents.slice(0, 20)
+        recentWebhookEvents: webhookEvents.slice(0, 20),
+        recentApiEvents: apiEvents.slice(0, 20),
+        recentThreads
     });
 });
 
@@ -411,6 +536,7 @@ app.get('/api/whatsapp/contacts', (_req, res) => {
 app.post('/api/whatsapp/send', async (req, res) => {
     const waId = normalizeWaId(req.body?.waId || '');
     const text = String(req.body?.text || '').trim();
+    const contextMessageId = String(req.body?.contextMessageId || '').trim();
 
     if (!waId || !text) {
         return res.status(400).json({ ok: false, error: 'waId and text are required' });
@@ -418,24 +544,43 @@ app.post('/api/whatsapp/send', async (req, res) => {
 
     try {
         ensureWhatsappConfig();
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'send',
+            waId,
+            type: 'text',
+            text,
+            contextMessageId
+        });
         const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
             messaging_product: 'whatsapp',
             to: waId,
             type: 'text',
-            text: { body: text }
+            text: { body: text },
+            ...(contextMessageId ? { context: { message_id: contextMessageId } } : {})
         });
 
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
+        const replyTo = makeReplyReference(waId, contextMessageId);
         upsertContact(waId, profileName);
         addMessage(waId, {
             id: messageId,
             direction: 'outgoing',
             text,
             timestamp,
+            replyTo,
             status: 'sent',
             statusTimestamp: timestamp
+        });
+        pushApiEvent({
+            at: timestamp,
+            route: 'send',
+            waId,
+            type: 'text',
+            ok: true,
+            messageId
         });
 
         broadcast({
@@ -447,6 +592,7 @@ app.post('/api/whatsapp/send', async (req, res) => {
                 direction: 'outgoing',
                 text,
                 timestamp,
+                replyTo,
                 status: 'sent',
                 statusTimestamp: timestamp
             }
@@ -454,6 +600,14 @@ app.post('/api/whatsapp/send', async (req, res) => {
 
         return res.json({ ok: true, id: messageId });
     } catch (error) {
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'send',
+            waId,
+            type: 'text',
+            ok: false,
+            error: error?.message || 'Unexpected send error'
+        });
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected send error' });
     }
 });
@@ -465,6 +619,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
     const dataUrl = String(req.body?.dataUrl || '');
     const requestedType = String(req.body?.messageType || '').trim().toLowerCase();
     const caption = String(req.body?.caption || '').trim();
+    const contextMessageId = String(req.body?.contextMessageId || '').trim();
 
     if (!waId || !fileName || !dataUrl) {
         return res.status(400).json({ ok: false, error: 'waId, fileName and dataUrl are required' });
@@ -473,6 +628,15 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
     try {
         ensureWhatsappConfig();
         const messageType = ['image', 'audio', 'video', 'document'].includes(requestedType) ? requestedType : 'document';
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'send-media',
+            waId,
+            type: messageType,
+            fileName,
+            caption,
+            contextMessageId
+        });
         const mediaId = await uploadWhatsappMedia({ fileName, mimeType, dataUrl });
         const mediaPayload = {
             id: mediaId
@@ -487,13 +651,15 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
             messaging_product: 'whatsapp',
             to: waId,
             type: messageType,
-            [messageType]: mediaPayload
+            [messageType]: mediaPayload,
+            ...(contextMessageId ? { context: { message_id: contextMessageId } } : {})
         });
 
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
         const text = caption || `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}] ${fileName}`;
+        const replyTo = makeReplyReference(waId, contextMessageId);
         upsertContact(waId, profileName);
         addMessage(waId, {
             id: messageId,
@@ -503,9 +669,21 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
             messageType,
             attachmentName: fileName,
             attachmentUrl: '',
+            mediaId,
             mimeType: mimeType || '',
+            replyTo,
             status: 'sent',
             statusTimestamp: timestamp
+        });
+        pushApiEvent({
+            at: timestamp,
+            route: 'send-media',
+            waId,
+            type: messageType,
+            ok: true,
+            messageId,
+            mediaId,
+            fileName
         });
 
         broadcast({
@@ -520,7 +698,9 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
                 messageType,
                 attachmentName: fileName,
                 attachmentUrl: '',
+                mediaId,
                 mimeType: mimeType || '',
+                replyTo,
                 status: 'sent',
                 statusTimestamp: timestamp
             }
@@ -533,9 +713,19 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
             messageType,
             attachmentName: fileName,
             attachmentUrl: '',
+            mediaId,
             mimeType: mimeType || ''
         });
     } catch (error) {
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'send-media',
+            waId,
+            type: requestedType || 'document',
+            ok: false,
+            fileName,
+            error: error?.message || 'Unexpected media send error'
+        });
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected media send error' });
     }
 });
@@ -543,6 +733,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
 app.post('/api/whatsapp/initiate', async (req, res) => {
     const waId = normalizeWaId(req.body?.waId || '');
     const contactName = String(req.body?.contactName || '').trim() || 'there';
+    const agentName = String(req.body?.agentName || '').trim() || 'our team';
 
     if (!waId) {
         return res.status(400).json({ ok: false, error: 'waId is required' });
@@ -553,26 +744,49 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
 
     try {
         ensureWhatsappConfig();
-        const components = contactName
-            ? [{
-                type: 'body',
-                parameters: [
-                    { type: 'text', text: contactName }
-                ]
-            }]
-            : [];
-        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
-            messaging_product: 'whatsapp',
-            to: waId,
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'initiate',
+            waId,
             type: 'template',
-            template: {
-                name: whatsappInitiationTemplateName,
-                language: {
-                    code: whatsappInitiationTemplateLanguage
-                },
-                ...(components.length ? { components } : {})
-            }
+            templateName: whatsappInitiationTemplateName,
+            templateLanguage: whatsappInitiationTemplateLanguage
         });
+        const attempts = getInitiationTemplateParamAttempts(contactName, agentName);
+        let result = null;
+        let lastError = null;
+        for (const attempt of attempts) {
+            try {
+                result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+                    messaging_product: 'whatsapp',
+                    to: waId,
+                    type: 'template',
+                    template: {
+                        name: whatsappInitiationTemplateName,
+                        language: {
+                            code: whatsappInitiationTemplateLanguage
+                        },
+                        ...(attempt.components.length ? { components: attempt.components } : {})
+                    }
+                });
+                lastError = null;
+                break;
+            } catch (error) {
+                lastError = error;
+                if (typeof whatsappInitiationTemplateParamOrder === 'string') {
+                    break;
+                }
+                if (getGraphErrorCode(error) !== '132000') {
+                    break;
+                }
+            }
+        }
+        if (!result) {
+            if (lastError && getGraphErrorCode(lastError) === '132000' && typeof whatsappInitiationTemplateParamOrder !== 'string') {
+                throw new Error('Template parameter mismatch. Set WHATSAPP_INIT_TEMPLATE_PARAM_ORDER to match your approved template, e.g. "none", "contactName", "agentName", or "contactName,agentName". Original Meta error: ' + lastError.message);
+            }
+            throw lastError || new Error('Chat initiation failed');
+        }
 
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
@@ -587,6 +801,16 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             messageType: 'template',
             status: 'sent',
             statusTimestamp: timestamp
+        });
+        pushApiEvent({
+            at: timestamp,
+            route: 'initiate',
+            waId,
+            type: 'template',
+            ok: true,
+            messageId,
+            templateName: whatsappInitiationTemplateName,
+            templateLanguage: whatsappInitiationTemplateLanguage
         });
 
         broadcast({
@@ -606,7 +830,97 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
 
         return res.json({ ok: true, id: messageId, text });
     } catch (error) {
+        pushApiEvent({
+            at: new Date().toISOString(),
+            route: 'initiate',
+            waId,
+            type: 'template',
+            ok: false,
+            templateName: whatsappInitiationTemplateName,
+            templateLanguage: whatsappInitiationTemplateLanguage,
+            error: error?.message || 'Unexpected initiation error'
+        });
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected initiation error' });
+    }
+});
+
+app.post('/api/whatsapp/forward', async (req, res) => {
+    const targetWaId = normalizeWaId(req.body?.targetWaId || '');
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+
+    if (!targetWaId || !messages.length) {
+        return res.status(400).json({ ok: false, error: 'targetWaId and messages are required' });
+    }
+
+    try {
+        ensureWhatsappConfig();
+        const profileName = contactsByWaId.get(targetWaId)?.profileName || targetWaId;
+        const forwardedIds = [];
+
+        for (const message of messages) {
+            const messageType = String(message?.messageType || 'text');
+            const text = String(message?.text || '').trim();
+            if (messageType === 'text' || messageType === 'template') {
+                const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+                    messaging_product: 'whatsapp',
+                    to: targetWaId,
+                    type: 'text',
+                    text: { body: text || '(forwarded message)' }
+                });
+                const messageId = result?.messages?.[0]?.id || '';
+                const timestamp = new Date().toISOString();
+                addMessage(targetWaId, {
+                    id: messageId,
+                    direction: 'outgoing',
+                    text: text || '(forwarded message)',
+                    timestamp,
+                    messageType: 'text',
+                    status: 'sent',
+                    statusTimestamp: timestamp
+                });
+                forwardedIds.push(messageId);
+                continue;
+            }
+
+            const mediaId = String(message?.mediaId || '').trim();
+            if (!mediaId) {
+                throw new Error(`Cannot forward "${message?.attachmentName || 'attachment'}" because mediaId is missing`);
+            }
+            const payload = { id: mediaId };
+            if (text && ['image', 'video', 'document'].includes(messageType)) {
+                payload.caption = text;
+            }
+            if (messageType === 'document' && message?.attachmentName) {
+                payload.filename = String(message.attachmentName);
+            }
+            const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+                messaging_product: 'whatsapp',
+                to: targetWaId,
+                type: messageType,
+                [messageType]: payload
+            });
+            const messageId = result?.messages?.[0]?.id || '';
+            const timestamp = new Date().toISOString();
+            addMessage(targetWaId, {
+                id: messageId,
+                direction: 'outgoing',
+                text: text || `[${messageType}] ${message?.attachmentName || ''}`.trim(),
+                timestamp,
+                messageType,
+                attachmentName: String(message?.attachmentName || ''),
+                attachmentUrl: '',
+                mediaId,
+                mimeType: String(message?.mimeType || ''),
+                status: 'sent',
+                statusTimestamp: timestamp
+            });
+            forwardedIds.push(messageId);
+        }
+
+        upsertContact(targetWaId, profileName);
+        return res.json({ ok: true, forwarded: forwardedIds.length, ids: forwardedIds });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Unexpected forward error' });
     }
 });
 

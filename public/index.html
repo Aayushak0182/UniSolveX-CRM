@@ -64,9 +64,9 @@
         <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
             <div class="p-4 border-b flex justify-between items-center bg-gray-50">
                 <div>
-                    <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Chat with Jiyani</h2>
-                    <p id="chatHeaderStatus" class="text-xs text-green-600 flex items-center gap-1">
-                        <span class="w-2 h-2 bg-green-500 rounded-full"></span> Active Now
+                    <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Select a contact</h2>
+                    <p id="chatHeaderStatus" class="text-xs text-gray-500 flex items-center gap-1">
+                        <span class="w-2 h-2 bg-gray-300 rounded-full"></span> No active chat
                     </p>
                     <p id="chatWindowTimer" class="mt-1 text-[11px] font-mono font-medium text-amber-700">--:--:--</p>
                 </div>
@@ -75,23 +75,29 @@
                 </button>
             </div>
 
-            <div id="chatMessages" class="flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4 bg-[#f8f9fa]">
-                <div class="flex flex-col items-start">
-                    <div class="chat-bubble-client p-3 max-w-md shadow-sm text-sm text-gray-700">
-                        And how much would you charge me for the SAP project?
-                    </div>
-                    <span class="text-[10px] text-gray-400 mt-1 ml-1">9:05 AM</span>
-                </div>
-
-                <div class="flex flex-col items-end">
-                    <div class="chat-bubble-admin p-3 max-w-md shadow-sm text-sm text-gray-800">
-                        Alright, this will cost you 75 CAD. Shall I confirm and start the work?
-                    </div>
-                    <span class="text-[10px] text-gray-400 mt-1 mr-1">9:15 AM</span>
-                </div>
+            <div id="chatMessages" class="chat-wallpaper flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
+                <p class="text-sm text-gray-500">No WhatsApp messages yet.</p>
             </div>
 
             <div class="p-4 border-t bg-white">
+                <div id="chatReplyPreview" class="mb-3 hidden items-start justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                    <div class="min-w-0">
+                        <p class="font-semibold">Replying to</p>
+                        <p id="chatReplyPreviewText" class="truncate text-indigo-800"></p>
+                    </div>
+                    <button id="clearReplyBtn" type="button" class="text-xs font-semibold text-indigo-700">Clear</button>
+                </div>
+                <div id="chatForwardToolbar" class="mb-3 hidden items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <div>
+                        <p class="font-semibold">Forward mode</p>
+                        <p id="chatForwardSelectionCount">0 selected</p>
+                        <p id="chatForwardTargetHint" class="mt-1 text-[11px] text-amber-800">Select messages, then click a contact from the left list.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="cancelForwardBtn" type="button" class="rounded-md border border-amber-300 px-2 py-1 font-medium text-amber-800">Cancel</button>
+                        <button id="confirmForwardBtn" type="button" class="rounded-md bg-amber-500 px-2 py-1 font-medium text-white">Choose Contact</button>
+                    </div>
+                </div>
                 <div id="chatComposerAttachments" class="mb-3 hidden flex flex-wrap gap-2"></div>
                 <div class="flex items-center gap-3 bg-gray-50 p-2 rounded-xl border">
                     <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
@@ -128,53 +134,7 @@
                      <option value="past7d">Past 7 days</option>
                  </select>
              </div>
-            <div id="orderList" class="p-3 overflow-y-auto custom-scrollbar space-y-2">
-                <div class="order-card bg-red-50 p-3 rounded-lg border border-red-200 shadow-sm" data-service-type="Project" data-client-id="507512" data-assigned-to="Aayush" data-created-by="Aayush" data-labels="" data-description="" data-instructions="" data-topic="" data-live-sessions="0" data-activity="" data-expert-deadline="15/02/2026" data-expert-payout="INR 0" data-session-start="" data-session-duration="">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="order-status text-[10px] font-bold uppercase text-orange-600 bg-orange-50 px-2 py-0.5 rounded">In Progress</span>
-                        <div class="flex items-center gap-2">
-                            <span class="order-id text-[10px] text-gray-400 font-mono">#507512</span>
-                            <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
-                                <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="order-title-row flex items-center gap-2">
-                        <h4 class="order-title text-sm font-bold text-gray-800">SAP for Accounting</h4>
-                        <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Project</span>
-                    </div>
-                    <p class="order-client-note text-[11px] text-gray-500 mt-0.5">Jiyani Nency</p>
-                    <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
-                        <p>C.A - <span class="order-amount font-semibold text-indigo-600">CAD 100</span><span class="order-payment-indicator hidden ml-1"></span></p>
-                        <p>E.D - <span class="order-expert-deadline text-amber-700 font-medium">15/02/2026</span></p>
-                        <p>C.D - <span class="order-deadline text-red-500 font-medium">13/02/2026</span></p>
-                        <p>By - <span class="order-created-by text-gray-700 font-medium">Aayush</span></p>
-                    </div>
-                </div>
-
-                <div class="order-card bg-blue-50 p-3 rounded-lg border border-blue-200 shadow-sm opacity-80" data-service-type="Assignment Help" data-client-id="509200" data-assigned-to="Aayush" data-created-by="Aayush" data-labels="" data-description="" data-instructions="" data-topic="" data-live-sessions="0" data-activity="" data-expert-deadline="Completed" data-expert-payout="INR 0" data-session-start="" data-session-duration="">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="order-status text-[10px] font-bold uppercase text-green-600 bg-green-50 px-2 py-0.5 rounded">Completed</span>
-                        <div class="flex items-center gap-2">
-                            <span class="order-id text-[10px] text-gray-400 font-mono">#509200</span>
-                            <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
-                                <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="order-title-row flex items-center gap-2">
-                        <h4 class="order-title text-sm font-bold text-gray-800">Business Assignment</h4>
-                        <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Assignment Help</span>
-                    </div>
-                    <p class="order-client-note text-[11px] text-gray-500 mt-0.5">Priyanka Sharma</p>
-                    <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
-                        <p>C.A - <span class="order-amount font-semibold text-indigo-600">INR 2000</span><span class="order-payment-indicator hidden ml-1"></span></p>
-                        <p>E.D - <span class="order-expert-deadline text-amber-700 font-medium">Completed</span></p>
-                        <p>C.D - <span class="order-deadline text-red-500 font-medium">Completed</span></p>
-                        <p>By - <span class="order-created-by text-gray-700 font-medium">Aayush</span></p>
-                    </div>
-                </div>
-            </div>
+            <div id="orderList" class="p-3 overflow-y-auto custom-scrollbar space-y-2"></div>
         </aside>
     </div>
 
@@ -184,7 +144,7 @@
             <div class="space-y-4">
                 <div>
                     <label class="text-xs font-bold text-gray-500 uppercase">Client</label>
-                    <input id="taskClientInput" type="text" value="Jiyani Nency (507512)" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded text-sm">
+                    <input id="taskClientInput" type="text" value="" placeholder="Select a contact first" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded text-sm">
                 </div>
                 <div>
                     <label class="text-xs font-bold text-gray-500 uppercase">Service Type</label>
