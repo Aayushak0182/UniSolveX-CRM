@@ -29,6 +29,8 @@ lucide.createIcons();
         const chatMessages = document.getElementById('chatMessages');
         const chatInput = document.getElementById('chatInput');
         const chatFileInput = document.getElementById('chatFileInput');
+        const odActualDeadlineInput = document.getElementById('odActualDeadline');
+        const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
         const chatHeaderTitle = document.getElementById('chatHeaderTitle');
         const chatHeaderStatus = document.getElementById('chatHeaderStatus');
         const chatWindowTimerEl = document.getElementById('chatWindowTimer');
@@ -1019,6 +1021,44 @@ lucide.createIcons();
             return hh + ':' + mm + ' ' + ampm;
         }
 
+        function isMediaMessageType(messageType) {
+            return ['image', 'document', 'audio', 'video'].includes(String(messageType || '').toLowerCase());
+        }
+
+        function getActiveChatContactName() {
+            return (chatHeaderTitle?.textContent || '').replace(/^Chat with\s+/i, '').trim() || normalizeWaId(activeWhatsappWaId);
+        }
+
+        function applyChatInitiationPreview(previewText) {
+            if (!chatInput) return;
+            const normalizedPreview = String(previewText || '').replace(/\s+/g, ' ').trim();
+            if (!chatInput.dataset.defaultPlaceholder) {
+                chatInput.dataset.defaultPlaceholder = chatInput.getAttribute('placeholder') || 'Type message here...';
+            }
+            chatInput.setAttribute('placeholder', normalizedPreview || chatInput.dataset.defaultPlaceholder);
+            chatInput.title = String(previewText || '').trim();
+        }
+
+        function clearChatInitiationPreview() {
+            if (!chatInput) return;
+            chatInput.setAttribute('placeholder', chatInput.dataset.defaultPlaceholder || 'Type message here...');
+            chatInput.title = '';
+        }
+
+        function applyExpertDeadlineConstraint() {
+            if (!odActualDeadlineInput || !odExpertDeadlineInput) return;
+            const actualDeadline = (odActualDeadlineInput.value || '').trim();
+            odExpertDeadlineInput.disabled = !actualDeadline;
+            odExpertDeadlineInput.max = actualDeadline || '';
+            if (!actualDeadline) {
+                odExpertDeadlineInput.value = '';
+                return;
+            }
+            if (odExpertDeadlineInput.value && odExpertDeadlineInput.value > actualDeadline) {
+                odExpertDeadlineInput.value = actualDeadline;
+            }
+        }
+
         function normalizeMessageStatus(rawStatus) {
             const status = String(rawStatus || '').toLowerCase();
             if (status === 'read') return 'read';
@@ -1095,7 +1135,7 @@ lucide.createIcons();
                         </div>
                     `
                     : '';
-                const bubbleBody = messageType !== 'text'
+                const bubbleBody = isMediaMessageType(messageType)
                     ? `
                         <div class="chat-bubble-file">
                             <p class="font-semibold capitalize">${escapeHtml(messageType)}</p>
@@ -1480,6 +1520,14 @@ lucide.createIcons();
             orderDeliveryWindow.addEventListener('change', applyOrderSearchFilter);
         }
         applyOrderSearchFilter();
+        applyExpertDeadlineConstraint();
+        if (odActualDeadlineInput) {
+            odActualDeadlineInput.addEventListener('input', applyExpertDeadlineConstraint);
+            odActualDeadlineInput.addEventListener('change', applyExpertDeadlineConstraint);
+        }
+        if (odExpertDeadlineInput) {
+            odExpertDeadlineInput.addEventListener('change', applyExpertDeadlineConstraint);
+        }
         taskServiceType.addEventListener('change', function() {
             const isLiveSession = this.value.toLowerCase() === 'live session';
             liveSessionCreateFields.classList.toggle('hidden', !isLiveSession);
@@ -1609,6 +1657,7 @@ lucide.createIcons();
             document.getElementById('odLabels').value = card.dataset.labels || '';
             document.getElementById('odActualDeadline').value = toDateTimeLocalValue(deadline);
             document.getElementById('odExpertDeadline').value = toDateTimeLocalValue(card.dataset.expertDeadline || '');
+            applyExpertDeadlineConstraint();
             const amountMatch = amount.match(/^([A-Za-z]{3})\s+(.+)$/);
             if (amountMatch) {
                 document.getElementById('odBaseCurrency').value = amountMatch[1].toUpperCase();
@@ -1661,6 +1710,11 @@ lucide.createIcons();
             const labels = document.getElementById('odLabels').value.trim();
             const actualDeadline = document.getElementById('odActualDeadline').value.trim();
             const expertDeadline = document.getElementById('odExpertDeadline').value.trim();
+            if (actualDeadline && expertDeadline && expertDeadline > actualDeadline) {
+                alert('Expert deadline actual deadline ke baad nahi ho sakta.');
+                applyExpertDeadlineConstraint();
+                return;
+            }
             const expertPayout = document.getElementById('odExpertPayout').value.trim();
             const baseCurrency = document.getElementById('odBaseCurrency').value.trim() || 'INR';
             const baseAmountValue = document.getElementById('odBaseAmountValue').value.trim();
@@ -1922,6 +1976,25 @@ lucide.createIcons();
                 return;
             }
             try {
+                const contactName = getActiveChatContactName();
+                const previewRes = await whatsappFetch('/api/whatsapp/initiate-preview', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        waId: normalizeWaId(activeWhatsappWaId),
+                        contactName,
+                        agentName
+                    })
+                });
+                const previewData = await previewRes.json();
+                const previewText = String(previewData?.previewText || '').trim();
+                applyChatInitiationPreview(previewText);
+                const shouldSend = window.confirm('Ye template send hoga:\n\n' + (previewText || '(preview unavailable)') + '\n\nAbhi bhejna hai?');
+                if (!shouldSend) {
+                    return;
+                }
                 const res = await whatsappFetch('/api/whatsapp/initiate', {
                     method: 'POST',
                     headers: {
@@ -1929,7 +2002,7 @@ lucide.createIcons();
                     },
                     body: JSON.stringify({
                         waId: normalizeWaId(activeWhatsappWaId),
-                        contactName: (chatHeaderTitle?.textContent || '').replace(/^Chat with\s+/i, '').trim(),
+                        contactName,
                         agentName
                     })
                 });
@@ -1939,7 +2012,7 @@ lucide.createIcons();
                 }
                 appendLocalOutgoingMessage(activeWhatsappWaId, {
                     id: data?.id || makeTempMessageId('template'),
-                    text: data?.text || 'Chat initiation template sent',
+                    text: data?.previewText || data?.text || previewText || 'Chat initiation template sent',
                     messageType: 'template',
                     status: 'sent'
                 });
@@ -1949,12 +2022,14 @@ lucide.createIcons();
                 console.error('Failed to send chat initiation:', err);
                 appendLocalOutgoingMessage(activeWhatsappWaId, {
                     id: makeTempMessageId('template_failed'),
-                    text: 'Chat initiation template',
+                    text: chatInput?.title || 'Chat initiation template',
                     messageType: 'template',
                     status: 'failed'
                 });
                 renderWhatsappMessages(activeWhatsappWaId);
                 alert('Chat initiation failed: ' + (err?.message || 'Unknown error'));
+            } finally {
+                clearChatInitiationPreview();
             }
         };
         // Send Button

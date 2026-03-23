@@ -72,6 +72,7 @@ This repo includes `render.yaml` for backend deployment on Render.
 - Health check path: `/health`
 - Set env vars in Render dashboard: `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` (recommended), and optionally `WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` (for sending messages)
 - For chat-initiation templates, also set `WHATSAPP_INIT_TEMPLATE_NAME`, optional `WHATSAPP_INIT_TEMPLATE_LANG`, and if your approved template has placeholders set `WHATSAPP_INIT_TEMPLATE_PARAM_ORDER` to `none`, `contactName`, `agentName`, or `contactName,agentName`
+- Optional: set `WHATSAPP_INIT_TEMPLATE_PREVIEW_TEXT` so the CRM can show the exact template preview in the chat input area and render that same text in the chat thread after sending
 
 ## Notes
 

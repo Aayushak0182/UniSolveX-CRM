@@ -13,6 +13,7 @@ const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME || '';
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
+const whatsappInitiationTemplatePreviewText = process.env.WHATSAPP_INIT_TEMPLATE_PREVIEW_TEXT || 'Hello 👋,\n\nThis is UniSolvex team. We would like to start a conversation with you.\n\nPlease reply to this message so we can talk.\n\nThank you!';
 
 app.use(cors());
 app.disable('x-powered-by');
@@ -321,6 +322,15 @@ function getInitiationTemplateParamAttempts(contactName, agentName) {
             seen.add(attempt.label);
             return true;
         });
+}
+
+function renderInitiationTemplatePreview(contactName, agentName) {
+    return String(whatsappInitiationTemplatePreviewText || '')
+        .replace(/\{\{\s*contactName\s*\}\}/gi, String(contactName || '').trim() || 'there')
+        .replace(/\{\{\s*agentName\s*\}\}/gi, String(agentName || '').trim() || 'our team')
+        .replace(/\{\{\s*1\s*\}\}/g, String(contactName || '').trim() || 'there')
+        .replace(/\{\{\s*2\s*\}\}/g, String(agentName || '').trim() || 'our team')
+        .trim();
 }
 
 async function uploadWhatsappMedia({ fileName, mimeType, dataUrl }) {
@@ -744,6 +754,7 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
 
     try {
         ensureWhatsappConfig();
+        const previewText = renderInitiationTemplatePreview(contactName, agentName);
         pushApiEvent({
             at: new Date().toISOString(),
             route: 'initiate',
@@ -791,7 +802,7 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
         const profileName = contactsByWaId.get(waId)?.profileName || waId;
         const timestamp = new Date().toISOString();
         const messageId = result?.messages?.[0]?.id || '';
-        const text = `Chat initiation template sent (${whatsappInitiationTemplateName})`;
+        const text = previewText || `Chat initiation template sent (${whatsappInitiationTemplateName})`;
         upsertContact(waId, profileName);
         addMessage(waId, {
             id: messageId,
@@ -828,7 +839,7 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             }
         });
 
-        return res.json({ ok: true, id: messageId, text });
+        return res.json({ ok: true, id: messageId, text, previewText, templateName: whatsappInitiationTemplateName });
     } catch (error) {
         pushApiEvent({
             at: new Date().toISOString(),
@@ -842,6 +853,17 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
         });
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected initiation error' });
     }
+});
+
+app.post('/api/whatsapp/initiate-preview', (req, res) => {
+    const contactName = String(req.body?.contactName || '').trim() || 'there';
+    const agentName = String(req.body?.agentName || '').trim() || 'our team';
+    return res.json({
+        ok: true,
+        templateName: whatsappInitiationTemplateName,
+        templateLanguage: whatsappInitiationTemplateLanguage,
+        previewText: renderInitiationTemplatePreview(contactName, agentName)
+    });
 });
 
 app.post('/api/whatsapp/forward', async (req, res) => {
