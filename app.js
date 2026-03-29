@@ -7,6 +7,9 @@ lucide.createIcons();
         const agentName = storedAgentName || 'Aayush';
         document.getElementById('agentNameDisplay').textContent = 'Agent: ' + agentName;
         document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
+        const themeIconSun = document.getElementById('themeIconSun');
+        const themeIconMoon = document.getElementById('themeIconMoon');
         const whatsappStatusEl = document.getElementById('whatsappStatus');
         const whatsappLastEventEl = document.getElementById('whatsappLastEvent');
         const contactList = document.getElementById('contactList');
@@ -53,6 +56,7 @@ lucide.createIcons();
         const WHATSAPP_API_BASE_STORAGE_KEY = 'whatsappApiBase';
         const WHATSAPP_LAST_WORKING_API_BASE_KEY = 'unisolvex_last_working_whatsapp_api_base_v1';
         const CONTACT_PANEL_WIDE_STORAGE_KEY = 'unisolvex_contact_panel_wide_v1';
+        const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
         const configuredWhatsappApiBase = localStorage.getItem(WHATSAPP_API_BASE_STORAGE_KEY);
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
@@ -79,6 +83,34 @@ lucide.createIcons();
         let forwardTargetSelectMode = false;
         let openMessageMenuId = '';
         const forwardSelectionIds = new Set();
+
+        function applyTheme(theme) {
+            const nextTheme = theme === 'dark' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', nextTheme);
+            document.documentElement.style.colorScheme = nextTheme;
+            localStorage.setItem(APP_THEME_STORAGE_KEY, nextTheme);
+            if (themeToggleBtn) {
+                themeToggleBtn.setAttribute('aria-pressed', nextTheme === 'dark' ? 'true' : 'false');
+                themeToggleBtn.setAttribute('title', nextTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+                themeToggleBtn.setAttribute('aria-label', nextTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+            }
+            if (themeIconSun) {
+                themeIconSun.classList.toggle('hidden', nextTheme === 'dark');
+            }
+            if (themeIconMoon) {
+                themeIconMoon.classList.toggle('hidden', nextTheme !== 'dark');
+            }
+        }
+
+        const savedTheme = localStorage.getItem(APP_THEME_STORAGE_KEY);
+        applyTheme(savedTheme || 'light');
+
+        if (themeToggleBtn) {
+            themeToggleBtn.addEventListener('click', () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+            });
+        }
 
         function setWhatsappStatus(text, level) {
             if (!whatsappStatusEl) return;

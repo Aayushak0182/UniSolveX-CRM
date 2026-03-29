@@ -9,7 +9,7 @@
     
     <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+<body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
 
     <!-- Navigation Bar -->
     <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
@@ -26,6 +26,10 @@
             </div>
             <span id="agentNameDisplay" class="text-sm font-medium text-gray-600">Agent: </span>
             <div id="agentInitialDisplay" class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold"></div>
+            <button id="themeToggleBtn" class="theme-toggle-btn" type="button" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                <i id="themeIconSun" data-lucide="sun" class="w-4 h-4"></i>
+                <i id="themeIconMoon" data-lucide="moon" class="w-4 h-4 hidden"></i>
+            </button>
             <button id="logoutBtn" class="ml-1 px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50">
                 Logout
             </button>
@@ -63,7 +67,7 @@
         </aside>
 
         <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
-            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+            <div class="chat-header p-4 border-b flex justify-between items-center bg-gray-50">
                 <div>
                     <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Select a contact</h2>
                     <p id="chatHeaderStatus" class="text-xs text-gray-500 flex items-center gap-1">
@@ -80,7 +84,7 @@
                 <p class="text-sm text-gray-500">No WhatsApp messages yet.</p>
             </div>
 
-            <div class="p-4 border-t bg-white">
+            <div class="chat-composer-shell p-4 border-t bg-white">
                 <div id="chatReplyPreview" class="mb-3 hidden items-start justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
                     <div class="min-w-0">
                         <p class="font-semibold">Replying to</p>
@@ -100,7 +104,7 @@
                     </div>
                 </div>
                 <div id="chatComposerAttachments" class="mb-3 hidden flex flex-wrap gap-2"></div>
-                <div class="flex items-center gap-3 bg-gray-50 p-2 rounded-xl border">
+                <div class="chat-composer-bar flex items-center gap-3 bg-gray-50 p-2 rounded-xl border">
                     <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
                         <i data-lucide="paperclip" class="w-5 h-5"></i>
                     </button>

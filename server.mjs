@@ -43,6 +43,12 @@ let firebaseDb = null;
 let firebaseBucket = null;
 let firebasePersistenceInitError = '';
 let firebasePersistenceEnabled = false;
+let persistedStateLoaded = false;
+let persistedStateLoadInFlight = null;
+let lastPersistedStateLoadAt = '';
+let lastPersistedStateError = '';
+let lastFirebaseWriteAt = '';
+let lastFirebaseWriteError = '';
 
 let loggedMissingAppSecret = false;
 let loggedMissingFirebasePersistence = false;
@@ -221,11 +227,18 @@ async function persistContactSnapshot(contact) {
         warnMissingFirebasePersistenceOnce();
         return;
     }
-    await firebaseDb.collection('wa_contacts').doc(String(contact.waId)).set({
-        waId: String(contact.waId),
-        profileName: String(contact.profileName || contact.waId),
-        updatedAt: String(contact.updatedAt || new Date().toISOString())
-    }, { merge: true });
+    try {
+        await firebaseDb.collection('wa_contacts').doc(String(contact.waId)).set({
+            waId: String(contact.waId),
+            profileName: String(contact.profileName || contact.waId),
+            updatedAt: String(contact.updatedAt || new Date().toISOString())
+        }, { merge: true });
+        lastFirebaseWriteAt = new Date().toISOString();
+        lastFirebaseWriteError = '';
+    } catch (error) {
+        lastFirebaseWriteError = error?.message || 'Failed to persist contact snapshot';
+        throw error;
+    }
 }
 
 async function persistMessageSnapshot(waId, message) {
@@ -235,12 +248,19 @@ async function persistMessageSnapshot(waId, message) {
         return '';
     }
     const docId = getPersistentMessageDocId(waId, message);
-    await firebaseDb.collection('wa_messages').doc(docId).set({
-        ...message,
-        waId: normalizeWaId(waId),
-        docId,
-        updatedAt: new Date().toISOString()
-    }, { merge: true });
+    try {
+        await firebaseDb.collection('wa_messages').doc(docId).set({
+            ...message,
+            waId: normalizeWaId(waId),
+            docId,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+        lastFirebaseWriteAt = new Date().toISOString();
+        lastFirebaseWriteError = '';
+    } catch (error) {
+        lastFirebaseWriteError = error?.message || 'Failed to persist message snapshot';
+        throw error;
+    }
     return docId;
 }
 
@@ -251,26 +271,94 @@ async function persistMessageStatusSnapshot(waId, messageId, status, statusTimes
         return;
     }
     const docId = getPersistentMessageDocId(waId, { id: messageId });
-    await firebaseDb.collection('wa_messages').doc(docId).set({
-        waId: normalizeWaId(waId),
-        id: messageId,
-        status,
-        statusTimestamp: statusTimestamp || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-    }, { merge: true });
+    try {
+        await firebaseDb.collection('wa_messages').doc(docId).set({
+            waId: normalizeWaId(waId),
+            id: messageId,
+            status,
+            statusTimestamp: statusTimestamp || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+        lastFirebaseWriteAt = new Date().toISOString();
+        lastFirebaseWriteError = '';
+    } catch (error) {
+        lastFirebaseWriteError = error?.message || 'Failed to persist message status snapshot';
+        throw error;
+    }
+}
+
+function findExistingMessageIndex(waId, candidateMessage) {
+    const thread = messagesByWaId.get(waId) || [];
+    const candidateId = String(candidateMessage?.id || '').trim();
+    if (candidateId) {
+        return thread.findIndex((message) => String(message?.id || '').trim() === candidateId);
+    }
+    const candidateKey = [
+        String(candidateMessage?.direction || ''),
+        String(candidateMessage?.timestamp || ''),
+        String(candidateMessage?.messageType || ''),
+        String(candidateMessage?.text || ''),
+        String(candidateMessage?.attachmentName || ''),
+        String(candidateMessage?.mediaId || ''),
+        String(candidateMessage?.replyTo?.id || '')
+    ].join('|');
+    return thread.findIndex((message) => ([
+        String(message?.direction || ''),
+        String(message?.timestamp || ''),
+        String(message?.messageType || ''),
+        String(message?.text || ''),
+        String(message?.attachmentName || ''),
+        String(message?.mediaId || ''),
+        String(message?.replyTo?.id || '')
+    ].join('|')) === candidateKey);
+}
+
+function mergePersistedMessageIntoMemory(waId, message) {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId || !message) return;
+    const nextMessage = {
+        id: String(message.id || ''),
+        text: String(message.text || ''),
+        timestamp: String(message.timestamp || new Date().toISOString()),
+        direction: String(message.direction || 'incoming'),
+        messageType: String(message.messageType || 'text'),
+        attachmentName: String(message.attachmentName || ''),
+        attachmentUrl: String(message.attachmentUrl || ''),
+        mediaId: String(message.mediaId || ''),
+        mimeType: String(message.mimeType || ''),
+        replyTo: message.replyTo || null,
+        status: String(message.status || ''),
+        statusTimestamp: String(message.statusTimestamp || message.timestamp || new Date().toISOString())
+    };
+    const existingIndex = findExistingMessageIndex(normalizedWaId, nextMessage);
+    if (existingIndex >= 0) {
+        const thread = messagesByWaId.get(normalizedWaId) || [];
+        thread[existingIndex] = {
+            ...thread[existingIndex],
+            ...nextMessage
+        };
+        messagesByWaId.set(normalizedWaId, thread);
+    } else {
+        addMessage(normalizedWaId, nextMessage);
+    }
 }
 
 async function loadPersistedStateIntoMemory() {
-    if (!initFirebasePersistence()) return;
+    if (!initFirebasePersistence()) return false;
     const contactsSnapshot = await firebaseDb.collection('wa_contacts').get();
     contactsSnapshot.forEach((doc) => {
         const data = doc.data() || {};
         if (!data.waId) return;
-        contactsByWaId.set(String(data.waId), {
-            waId: String(data.waId),
+        const waId = String(data.waId);
+        const existing = contactsByWaId.get(waId);
+        const nextContact = {
+            waId,
             profileName: String(data.profileName || data.waId),
             updatedAt: String(data.updatedAt || new Date().toISOString())
-        });
+        };
+        if (!existing || new Date(nextContact.updatedAt).getTime() >= new Date(existing.updatedAt || 0).getTime()) {
+            contactsByWaId.set(waId, nextContact);
+        }
     });
 
     const messagesSnapshot = await firebaseDb.collection('wa_messages').orderBy('timestamp', 'asc').get();
@@ -278,21 +366,34 @@ async function loadPersistedStateIntoMemory() {
         const data = doc.data() || {};
         const waId = normalizeWaId(data.waId || '');
         if (!waId) return;
-        addMessage(waId, {
-            id: String(data.id || ''),
-            text: String(data.text || ''),
-            timestamp: String(data.timestamp || new Date().toISOString()),
-            direction: String(data.direction || 'incoming'),
-            messageType: String(data.messageType || 'text'),
-            attachmentName: String(data.attachmentName || ''),
-            attachmentUrl: String(data.attachmentUrl || ''),
-            mediaId: String(data.mediaId || ''),
-            mimeType: String(data.mimeType || ''),
-            replyTo: data.replyTo || null,
-            status: String(data.status || ''),
-            statusTimestamp: String(data.statusTimestamp || data.timestamp || new Date().toISOString())
-        });
+        mergePersistedMessageIntoMemory(waId, data);
     });
+    persistedStateLoaded = true;
+    lastPersistedStateLoadAt = new Date().toISOString();
+    lastPersistedStateError = '';
+    return true;
+}
+
+async function ensurePersistedStateLoaded(forceRefresh = false) {
+    if (persistedStateLoadInFlight) {
+        return persistedStateLoadInFlight;
+    }
+    if (!forceRefresh && persistedStateLoaded) {
+        return true;
+    }
+    if (!initFirebasePersistence()) {
+        return false;
+    }
+    persistedStateLoadInFlight = loadPersistedStateIntoMemory()
+        .catch((error) => {
+            persistedStateLoaded = false;
+            lastPersistedStateError = error?.message || 'Failed to load persisted chat state';
+            throw error;
+        })
+        .finally(() => {
+            persistedStateLoadInFlight = null;
+        });
+    return persistedStateLoadInFlight;
 }
 
 function safeTimingCompareHex(expectedHex, actualHex) {
@@ -614,12 +715,36 @@ async function uploadWhatsappMedia({ fileName, mimeType, dataUrl }) {
     return result?.id || '';
 }
 
-app.get('/health', (_req, res) => {
-    res.json({ ok: true, service: 'whatsapp-webhook', at: new Date().toISOString() });
-});
-
 app.get('/', (_req, res) => {
     res.status(200).send('OK. Try /health (status) or /webhook (Meta callback).');
+});
+
+app.get('/health', async (_req, res) => {
+    let persistenceReachable = false;
+    let persistenceCheckError = '';
+    try {
+        if (await ensurePersistedStateLoaded(false)) {
+            persistenceReachable = true;
+        } else if (firebasePersistenceInitError) {
+            persistenceCheckError = firebasePersistenceInitError;
+        }
+    } catch (error) {
+        persistenceCheckError = error?.message || 'Failed to reach Firebase persistence';
+    }
+    return res.json({
+        ok: true,
+        service: 'whatsapp-webhook',
+        at: new Date().toISOString(),
+        firebasePersistenceEnabled,
+        persistedStateLoaded,
+        persistenceReachable,
+        firebasePersistenceInitError,
+        lastPersistedStateLoadAt,
+        lastPersistedStateError,
+        lastFirebaseWriteAt,
+        lastFirebaseWriteError,
+        persistenceCheckError
+    });
 });
 
 app.get('/webhook', (req, res) => {
@@ -767,6 +892,15 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/api/whatsapp/debug', (_req, res) => {
+    const persistence = {
+        enabled: firebasePersistenceEnabled,
+        loaded: persistedStateLoaded,
+        initError: firebasePersistenceInitError,
+        lastLoadAt: lastPersistedStateLoadAt,
+        lastLoadError: lastPersistedStateError,
+        lastWriteAt: lastFirebaseWriteAt,
+        lastWriteError: lastFirebaseWriteError
+    };
     const recentThreads = Array.from(messagesByWaId.entries())
         .map(([waId, rows]) => {
             const messages = Array.isArray(rows) ? rows : [];
@@ -793,6 +927,7 @@ app.get('/api/whatsapp/debug', (_req, res) => {
 
     res.json({
         ok: true,
+        persistence,
         contacts: contactsByWaId.size,
         messageThreads: messagesByWaId.size,
         recentWebhookEvents: webhookEvents.slice(0, 20),
@@ -801,7 +936,12 @@ app.get('/api/whatsapp/debug', (_req, res) => {
     });
 });
 
-app.get('/api/whatsapp/contacts', (_req, res) => {
+app.get('/api/whatsapp/contacts', async (_req, res) => {
+    try {
+        await ensurePersistedStateLoaded(false);
+    } catch (error) {
+        console.warn('[storage] Failed to refresh persisted chat state before contacts response:', error?.message || error);
+    }
     const rows = Array.from(contactsByWaId.values())
         .sort((a, b) => {
             const aTs = new Date(a.updatedAt).getTime();
@@ -1258,7 +1398,7 @@ app.post('/api/whatsapp/forward', async (req, res) => {
 
 try {
     if (initFirebasePersistence()) {
-        await loadPersistedStateIntoMemory();
+        await ensurePersistedStateLoaded(true);
         console.log('[storage] Firebase persistence enabled.');
         if (firebaseBucket) {
             console.log('[storage] Media backup bucket:', firebaseBucket.name);
