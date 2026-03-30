@@ -449,6 +449,20 @@ function normalizeWaId(value) {
     return String(value || '').replace(/[^\d]/g, '');
 }
 
+function normalizeWebhookTimestamp(rawTimestamp, fallbackIso = new Date().toISOString()) {
+    const fallbackMs = new Date(fallbackIso).getTime();
+    const numeric = Number(rawTimestamp || '0');
+    const candidateMs = numeric > 0 ? numeric * 1000 : Number.NaN;
+    if (!Number.isFinite(candidateMs)) return fallbackIso;
+
+    const minAllowedMs = Date.UTC(2020, 0, 1);
+    const maxAllowedMs = fallbackMs + (5 * 60 * 1000);
+    if (candidateMs < minAllowedMs || candidateMs > maxAllowedMs) {
+        return fallbackIso;
+    }
+    return new Date(candidateMs).toISOString();
+}
+
 function upsertContact(waId, profileName) {
     if (!waId) return null;
     const existing = contactsByWaId.get(waId) || { waId, profileName: waId, updatedAt: new Date().toISOString() };
@@ -791,8 +805,7 @@ app.post('/webhook', (req, res) => {
                 const waId = normalizeWaId(incomingMessage.from || '');
                 const contactInfo = contacts.find((c) => c.wa_id === waId);
                 const profileName = contactInfo?.profile?.name || waId;
-                const tsMillis = Number(incomingMessage.timestamp || '0') * 1000;
-                const timestamp = tsMillis > 0 ? new Date(tsMillis).toISOString() : new Date().toISOString();
+                const timestamp = normalizeWebhookTimestamp(incomingMessage.timestamp, receivedAt);
                 const text = normalizeIncomingMessage(incomingMessage);
                 const attachmentMeta = getIncomingAttachmentMeta(incomingMessage);
                 const replyTo = makeReplyReference(waId, incomingMessage.context?.id || '');
@@ -858,8 +871,7 @@ app.post('/webhook', (req, res) => {
                 const waId = normalizeWaId(statusEvent.recipient_id || '');
                 const messageId = statusEvent.id || '';
                 const status = String(statusEvent.status || '').toLowerCase();
-                const tsMillis = Number(statusEvent.timestamp || '0') * 1000;
-                const statusTimestamp = tsMillis > 0 ? new Date(tsMillis).toISOString() : new Date().toISOString();
+                const statusTimestamp = normalizeWebhookTimestamp(statusEvent.timestamp, receivedAt);
                 if (!waId || !messageId || !status) return;
 
                 updateMessageStatus(waId, messageId, status, statusTimestamp);
