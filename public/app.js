@@ -1927,11 +1927,6 @@ lucide.createIcons();
                 });
 
                 mergedByWaId.forEach((entry, waId) => {
-                    upsertWhatsappContact({
-                        waId,
-                        profileName: entry.profileName || waId,
-                        updatedAt: entry.updatedAt || ''
-                    }, false);
                     entry.messages.forEach((m) => {
                         const messageId = m?.id || '';
                         if (!messageId) return;
@@ -1963,7 +1958,14 @@ lucide.createIcons();
                             return true;
                         })
                         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                    upsertWhatsappContact({
+                        waId,
+                        profileName: entry.profileName || waId,
+                        updatedAt: entry.updatedAt || ''
+                    }, false);
                 });
+                refreshContactOrder();
+                applyContactFilter();
                 if (activeWhatsappWaId) {
                     renderWhatsappMessages(activeWhatsappWaId);
                 }
