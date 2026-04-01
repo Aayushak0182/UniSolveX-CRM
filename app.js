@@ -505,6 +505,14 @@ lucide.createIcons();
             sorted.forEach((item) => contactList.appendChild(item));
         }
 
+        function scheduleContactOrderRefresh() {
+            refreshContactOrder();
+            setTimeout(() => {
+                refreshContactOrder();
+                applyContactFilter();
+            }, 0);
+        }
+
         function applyContactFilter() {
             const filterValue = contactFilter.value;
             const searchValue = (contactSearch.value || '').trim().toLowerCase();
@@ -604,8 +612,7 @@ lucide.createIcons();
             item.dataset.unreadCount = String(count);
             item.dataset.unread = count > 0 ? 'true' : 'false';
             updateContactStateUI(item);
-            refreshContactOrder();
-            applyContactFilter();
+            scheduleContactOrderRefresh();
         }
 
         function getPreferredProfileName(existingName, incomingName, waId) {
@@ -1287,8 +1294,7 @@ lucide.createIcons();
                     e.stopPropagation();
                     item.dataset.pinned = item.dataset.pinned === 'true' ? 'false' : 'true';
                     updateContactStateUI(item);
-                    refreshContactOrder();
-                    applyContactFilter();
+                    scheduleContactOrderRefresh();
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -1320,8 +1326,7 @@ lucide.createIcons();
                         timezone: item.dataset.timezone || getAutoTimezone()
                     });
                     updateContactStateUI(item);
-                    refreshContactOrder();
-                    applyContactFilter();
+                    scheduleContactOrderRefresh();
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -1529,8 +1534,7 @@ lucide.createIcons();
             if (contactItem) {
                 contactItem.dataset.lastActivity = String(new Date(normalizedMessage.timestamp || Date.now()).getTime() || Date.now());
                 updateContactStateUI(contactItem);
-                refreshContactOrder();
-                applyContactFilter();
+                scheduleContactOrderRefresh();
             }
             return normalizedMessage;
         }
@@ -1881,8 +1885,7 @@ lucide.createIcons();
             if (contactItem) {
                 contactItem.dataset.lastActivity = String(new Date(payload.timestamp || Date.now()).getTime() || Date.now());
                 updateContactStateUI(contactItem);
-                refreshContactOrder();
-                applyContactFilter();
+                scheduleContactOrderRefresh();
             }
 
             if (activeWhatsappWaId === waId) {
@@ -1964,8 +1967,7 @@ lucide.createIcons();
                         updatedAt: entry.updatedAt || ''
                     }, false);
                 });
-                refreshContactOrder();
-                applyContactFilter();
+                scheduleContactOrderRefresh();
                 if (activeWhatsappWaId) {
                     renderWhatsappMessages(activeWhatsappWaId);
                 }
@@ -2070,6 +2072,7 @@ lucide.createIcons();
         async function initWhatsappSync() {
             await resolveWhatsappApiBase(false);
             await loadWhatsappContacts();
+            scheduleContactOrderRefresh();
             initWhatsappRealtime();
             initWhatsappPolling();
             initWhatsappDebugPolling();
@@ -2085,6 +2088,7 @@ lucide.createIcons();
         setActiveContactItem(null);
         updateTaskClientInputFromContact(null);
         restoreManualContactsFromStorage();
+        scheduleContactOrderRefresh();
         initWhatsappSync();
         if (chatHeaderAvatar) chatHeaderAvatar.textContent = '?';
         updateChatHeaderVisibility('');
