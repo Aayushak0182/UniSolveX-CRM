@@ -343,6 +343,38 @@ function mergePersistedMessageIntoMemory(waId, message) {
     }
 }
 
+function ensureContactForThread(waId, fallbackProfileName = '') {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId) return null;
+    const existing = contactsByWaId.get(normalizedWaId);
+    const thread = messagesByWaId.get(normalizedWaId) || [];
+    const lastMessage = thread[thread.length - 1] || null;
+    const candidateUpdatedAt = String(
+        existing?.updatedAt ||
+        lastMessage?.timestamp ||
+        new Date().toISOString()
+    );
+    const nextContact = {
+        waId: normalizedWaId,
+        profileName: String(existing?.profileName || fallbackProfileName || normalizedWaId),
+        updatedAt: candidateUpdatedAt
+    };
+    if (!existing) {
+        contactsByWaId.set(normalizedWaId, nextContact);
+        return nextContact;
+    }
+    const existingUpdatedAtMs = new Date(existing.updatedAt || 0).getTime() || 0;
+    const candidateUpdatedAtMs = new Date(candidateUpdatedAt).getTime() || 0;
+    if (candidateUpdatedAtMs >= existingUpdatedAtMs) {
+        existing.updatedAt = candidateUpdatedAt;
+    }
+    if (!String(existing.profileName || '').trim() && nextContact.profileName) {
+        existing.profileName = nextContact.profileName;
+    }
+    contactsByWaId.set(normalizedWaId, existing);
+    return existing;
+}
+
 async function loadPersistedStateIntoMemory() {
     if (!initFirebasePersistence()) return false;
     const contactsSnapshot = await firebaseDb.collection('wa_contacts').get();
@@ -367,6 +399,9 @@ async function loadPersistedStateIntoMemory() {
         const waId = normalizeWaId(data.waId || '');
         if (!waId) return;
         mergePersistedMessageIntoMemory(waId, data);
+    });
+    Array.from(messagesByWaId.keys()).forEach((waId) => {
+        ensureContactForThread(waId);
     });
     persistedStateLoaded = true;
     lastPersistedStateLoadAt = new Date().toISOString();
@@ -665,23 +700,21 @@ function getInitiationTemplateParamAttempts(contactName, agentName) {
         agentName: String(agentName || '').trim() || 'our team'
     };
 
-    if (typeof whatsappInitiationTemplateParamOrder === 'string') {
-        const configuredKeys = whatsappInitiationTemplateParamOrder
-            .split(',')
-            .map((item) => normalizeTemplateParamKey(item))
-            .filter(Boolean);
-        return [{
-            label: configuredKeys.length ? configuredKeys.join(',') : 'none',
-            components: buildTemplateComponentsFromValues(configuredKeys, valuesByKey)
-        }];
-    }
-
     const candidates = [
         [],
         ['contactName'],
         ['agentName'],
         ['contactName', 'agentName']
     ];
+
+    if (typeof whatsappInitiationTemplateParamOrder === 'string') {
+        const configuredKeys = whatsappInitiationTemplateParamOrder
+            .split(',')
+            .map((item) => normalizeTemplateParamKey(item))
+            .filter(Boolean);
+        candidates.unshift(configuredKeys);
+    }
+
     const seen = new Set();
     return candidates
         .map((keys) => ({
@@ -693,6 +726,28 @@ function getInitiationTemplateParamAttempts(contactName, agentName) {
             seen.add(attempt.label);
             return true;
         });
+}
+
+function getInitiationTemplateLanguageAttempts() {
+    const configured = String(whatsappInitiationTemplateLanguage || '').trim() || 'en_US';
+    const attempts = [];
+    const push = (code) => {
+        const value = String(code || '').trim();
+        if (!value || attempts.includes(value)) return;
+        attempts.push(value);
+    };
+
+    push(configured);
+    if (/^en(?:_|$)/i.test(configured)) {
+        push('en');
+        push('en_US');
+    }
+    if (/^[a-z]{2}_[A-Z]{2}$/.test(configured)) {
+        push(configured.split('_')[0]);
+    } else if (/^[a-z]{2}$/i.test(configured)) {
+        push(`${configured.toLowerCase()}_US`);
+    }
+    return attempts;
 }
 
 function renderInitiationTemplatePreview(contactName, agentName) {
@@ -954,10 +1009,24 @@ app.get('/api/whatsapp/contacts', async (_req, res) => {
     } catch (error) {
         console.warn('[storage] Failed to refresh persisted chat state before contacts response:', error?.message || error);
     }
-    const rows = Array.from(contactsByWaId.values())
+    const waIds = new Set([
+        ...Array.from(contactsByWaId.keys()),
+        ...Array.from(messagesByWaId.keys())
+    ]);
+    const rows = Array.from(waIds)
+        .map((waId) => ensureContactForThread(waId))
+        .filter(Boolean)
         .sort((a, b) => {
-            const aTs = new Date(a.updatedAt).getTime();
-            const bTs = new Date(b.updatedAt).getTime();
+            const aLastMessage = (messagesByWaId.get(a.waId) || []).slice(-1)[0];
+            const bLastMessage = (messagesByWaId.get(b.waId) || []).slice(-1)[0];
+            const aTs = Math.max(
+                new Date(aLastMessage?.timestamp || 0).getTime() || 0,
+                new Date(a.updatedAt || 0).getTime() || 0
+            );
+            const bTs = Math.max(
+                new Date(bLastMessage?.timestamp || 0).getTime() || 0,
+                new Date(b.updatedAt || 0).getTime() || 0
+            );
             return bTs - aTs;
         })
         .map((contact) => ({
@@ -1218,33 +1287,38 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             templateLanguage: whatsappInitiationTemplateLanguage
         });
         const attempts = getInitiationTemplateParamAttempts(contactName, agentName);
+        const languageAttempts = getInitiationTemplateLanguageAttempts();
         let result = null;
         let lastError = null;
-        for (const attempt of attempts) {
-            try {
-                result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
-                    messaging_product: 'whatsapp',
-                    to: waId,
-                    type: 'template',
-                    template: {
-                        name: whatsappInitiationTemplateName,
-                        language: {
-                            code: whatsappInitiationTemplateLanguage
-                        },
-                        ...(attempt.components.length ? { components: attempt.components } : {})
+        let resolvedTemplateLanguage = whatsappInitiationTemplateLanguage;
+        for (const languageCode of languageAttempts) {
+            for (const attempt of attempts) {
+                try {
+                    result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+                        messaging_product: 'whatsapp',
+                        to: waId,
+                        type: 'template',
+                        template: {
+                            name: whatsappInitiationTemplateName,
+                            language: {
+                                code: languageCode
+                            },
+                            ...(attempt.components.length ? { components: attempt.components } : {})
+                        }
+                    });
+                    resolvedTemplateLanguage = languageCode;
+                    lastError = null;
+                    break;
+                } catch (error) {
+                    lastError = error;
+                    const graphErrorCode = getGraphErrorCode(error);
+                    const languageMismatch = graphErrorCode === '132001' || /language/i.test(String(error?.message || ''));
+                    if (graphErrorCode !== '132000' && !languageMismatch) {
+                        break;
                     }
-                });
-                lastError = null;
-                break;
-            } catch (error) {
-                lastError = error;
-                if (typeof whatsappInitiationTemplateParamOrder === 'string') {
-                    break;
-                }
-                if (getGraphErrorCode(error) !== '132000') {
-                    break;
                 }
             }
+            if (result) break;
         }
         if (!result) {
             if (lastError && getGraphErrorCode(lastError) === '132000' && typeof whatsappInitiationTemplateParamOrder !== 'string') {
@@ -1278,7 +1352,7 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             ok: true,
             messageId,
             templateName: whatsappInitiationTemplateName,
-            templateLanguage: whatsappInitiationTemplateLanguage
+            templateLanguage: resolvedTemplateLanguage
         });
 
         broadcast({
@@ -1296,7 +1370,7 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
             }
         });
 
-        return res.json({ ok: true, id: messageId, text, previewText, templateName: whatsappInitiationTemplateName });
+        return res.json({ ok: true, id: messageId, text, previewText, templateName: whatsappInitiationTemplateName, templateLanguage: resolvedTemplateLanguage });
     } catch (error) {
         pushApiEvent({
             at: new Date().toISOString(),
@@ -1406,6 +1480,17 @@ app.post('/api/whatsapp/forward', async (req, res) => {
     } catch (error) {
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected forward error' });
     }
+});
+
+app.use((error, _req, res, next) => {
+    if (error?.type === 'entity.parse.failed') {
+        return res.status(400).json({
+            ok: false,
+            error: 'Invalid JSON body',
+            hint: 'Send a valid JSON payload. In PowerShell, prefer Invoke-RestMethod or pass curl data from a file to avoid quote escaping issues.'
+        });
+    }
+    return next(error);
 });
 
 try {

@@ -19,6 +19,8 @@ lucide.createIcons();
         const contactSearch = document.getElementById('contactSearch');
         const contactToolbar = document.querySelector('.contact-toolbar');
         const toggleContactPanelWidthBtn = document.getElementById('toggleContactPanelWidth');
+        const toggleArchivedViewBtn = document.getElementById('toggleArchivedViewBtn');
+        const archivedUnreadBadge = document.getElementById('archivedUnreadBadge');
         const addContactBtn = document.getElementById('addContactBtn');
         const orderList = document.getElementById('orderList');
         const orderSearch = document.getElementById('orderSearch');
@@ -61,6 +63,9 @@ lucide.createIcons();
         const chatForwardTargetHintEl = document.getElementById('chatForwardTargetHint');
         const cancelForwardBtn = document.getElementById('cancelForwardBtn');
         const confirmForwardBtn = document.getElementById('confirmForwardBtn');
+        const notifyBtn = document.getElementById('notifyBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const attachFileBtn = document.getElementById('attachFileBtn');
         let activeOrderCard = null;
         let activeWhatsappWaId = '';
         const orderSequenceByClient = {};
@@ -98,6 +103,10 @@ lucide.createIcons();
         let forwardTargetSelectMode = false;
         let openMessageMenuId = '';
         let openContactMenuId = '';
+        let whatsappSendInFlight = false;
+        let archivedInboxMode = false;
+        let whatsappTextSendProcessing = false;
+        const whatsappTextSendQueue = [];
         const forwardSelectionIds = new Set();
         let activeOrderTab = 'mine';
         let activeClientDetailsWaId = '';
@@ -406,11 +415,12 @@ lucide.createIcons();
             const isPinned = item.dataset.pinned === 'true';
             const unreadCount = Number(item.dataset.unreadCount || 0);
             const isUnread = unreadCount > 0 || item.dataset.unread === 'true';
+            const isArchived = String(item.dataset.tag || '').trim() === 'archived';
             const pinBtn = item.querySelector('.contact-action-pin');
             const readToggleBtn = item.querySelector('.contact-action-read');
+            const archiveToggleBtn = item.querySelector('.contact-action-archive');
             const unreadDot = item.querySelector('.contact-unread-dot');
             const contactName = item.querySelector('.contact-name');
-            const avatarBadge = item.querySelector('.contact-avatar-badge');
             const unreadCountBadge = item.querySelector('.contact-unread-count');
             const pinIcon = item.querySelector('.contact-pin-icon');
             const labelBadge = item.querySelector('.contact-label-badge');
@@ -424,15 +434,14 @@ lucide.createIcons();
             if (readToggleBtn) {
                 readToggleBtn.textContent = isUnread ? 'Mark as read' : 'Mark as unread';
             }
+            if (archiveToggleBtn) {
+                archiveToggleBtn.textContent = isArchived ? 'Unarchive chat' : 'Archive chat';
+            }
             if (unreadDot) {
                 unreadDot.classList.toggle('hidden', !isUnread);
             }
             if (contactName) {
                 contactName.classList.toggle('font-bold', isUnread);
-            }
-            if (avatarBadge) {
-                avatarBadge.textContent = String(Math.max(1, unreadCount || 0));
-                avatarBadge.classList.toggle('hidden', !isUnread);
             }
             if (unreadCountBadge) {
                 unreadCountBadge.textContent = String(Math.max(1, unreadCount || 0));
@@ -449,6 +458,7 @@ lucide.createIcons();
             if (lastTimeEl) {
                 lastTimeEl.textContent = latestActivity ? formatContactLastActivity(latestActivity) : '';
             }
+            updateArchivedToggleUI();
         }
 
         function setActiveContactItem(activeItem) {
@@ -506,8 +516,25 @@ lucide.createIcons();
                 const idText = (item.querySelector('.contact-meta')?.textContent || item.querySelector('p')?.textContent || '').toLowerCase();
                 const matchesTag = !filterValue || itemTag === filterValue;
                 const matchesSearch = !searchValue || nameText.includes(searchValue) || contactIdText.includes(searchValue) || idText.includes(searchValue);
-                item.style.display = !isArchived && matchesTag && matchesSearch ? '' : 'none';
+                const matchesArchiveMode = archivedInboxMode ? isArchived : !isArchived;
+                item.style.display = matchesArchiveMode && matchesTag && matchesSearch ? '' : 'none';
             });
+            updateArchivedToggleUI();
+        }
+
+        function updateArchivedToggleUI() {
+            if (!toggleArchivedViewBtn) return;
+            const archivedUnreadCount = contactItems.reduce((sum, item) => {
+                if (String(item?.dataset?.tag || '') !== 'archived') return sum;
+                return sum + (Math.max(0, Number(item.dataset.unreadCount || 0)) > 0 ? 1 : 0);
+            }, 0);
+            toggleArchivedViewBtn.classList.toggle('is-active', archivedInboxMode);
+            toggleArchivedViewBtn.setAttribute('aria-pressed', archivedInboxMode ? 'true' : 'false');
+            toggleArchivedViewBtn.title = archivedInboxMode ? 'Show active chats' : 'Show archived chats';
+            if (archivedUnreadBadge) {
+                archivedUnreadBadge.textContent = String(Math.max(1, archivedUnreadCount));
+                archivedUnreadBadge.classList.toggle('hidden', archivedUnreadCount <= 0);
+            }
         }
 
         function normalizeWaId(rawValue) {
@@ -1237,6 +1264,7 @@ lucide.createIcons();
             const menuToggleBtn = item.querySelector('.contact-menu-toggle');
             const pinBtn = item.querySelector('.contact-action-pin');
             const readToggleBtn = item.querySelector('.contact-action-read');
+            const archiveToggleBtn = item.querySelector('.contact-action-archive');
             const tagSelect = item.querySelector('.contact-menu-label');
 
             if (menuToggleBtn) {
@@ -1272,6 +1300,28 @@ lucide.createIcons();
                     e.stopPropagation();
                     const nextCount = Number(item.dataset.unreadCount || 0) > 0 ? 0 : 1;
                     setContactUnreadCount(item, nextCount);
+                    openContactMenuId = '';
+                    item.classList.remove('is-menu-open');
+                    item.querySelector('.contact-card-menu')?.classList.add('hidden');
+                });
+            }
+
+            if (archiveToggleBtn) {
+                archiveToggleBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const nextArchived = String(item.dataset.tag || '') === 'archived' ? '' : 'archived';
+                    item.dataset.tag = nextArchived;
+                    saveManualContact({
+                        waId: normalizeWaId(item.dataset.waId || ''),
+                        profileName: item.dataset.profileName || item.querySelector('.contact-name')?.textContent?.trim() || '',
+                        tag: nextArchived,
+                        universityName: item.dataset.universityName || '',
+                        semester: item.dataset.semester || '',
+                        timezone: item.dataset.timezone || getAutoTimezone()
+                    });
+                    updateContactStateUI(item);
+                    refreshContactOrder();
+                    applyContactFilter();
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -1399,12 +1449,57 @@ lucide.createIcons();
             return `${prefix || 'msg'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         }
 
+        function getWhatsappMessageDedupKey(message) {
+            if (!message) return '';
+            const id = String(message.id || '').trim();
+            if (id) return `id:${id}`;
+            return [
+                String(message.direction || 'outgoing'),
+                String(message.timestamp || ''),
+                String(message.messageType || 'text'),
+                String(message.text || ''),
+                String(message.attachmentName || ''),
+                String(message.mediaId || ''),
+                String(message.replyTo?.id || '')
+            ].join('|');
+        }
+
+        function findWhatsappMessageIndex(waId, message) {
+            const rows = Array.isArray(whatsappMessagesByContact[waId]) ? whatsappMessagesByContact[waId] : [];
+            const key = getWhatsappMessageDedupKey(message);
+            if (!key) return -1;
+            return rows.findIndex((row) => getWhatsappMessageDedupKey(row) === key);
+        }
+
+        function findWhatsappOutgoingMatchIndex(waId, message) {
+            const rows = Array.isArray(whatsappMessagesByContact[waId]) ? whatsappMessagesByContact[waId] : [];
+            if (!rows.length || String(message?.direction || '') !== 'outgoing') return -1;
+            const nextTimestamp = new Date(message?.timestamp || 0).getTime();
+            const nextReplyId = String(message?.replyTo?.id || '');
+            const nextText = String(message?.text || '').trim();
+            const nextType = String(message?.messageType || 'text');
+            return rows.findIndex((row) => {
+                if (String(row?.direction || '') !== 'outgoing') return false;
+                if (String(row?.id || '') === String(message?.id || '')) return false;
+                if (String(row?.messageType || 'text') !== nextType) return false;
+                if (String(row?.text || '').trim() !== nextText) return false;
+                if (String(row?.replyTo?.id || '') !== nextReplyId) return false;
+                const rowTimestamp = new Date(row?.timestamp || 0).getTime();
+                const tsCloseEnough = nextTimestamp && rowTimestamp
+                    ? Math.abs(nextTimestamp - rowTimestamp) <= 60000
+                    : true;
+                if (!tsCloseEnough) return false;
+                const rowId = String(row?.id || '');
+                return /^(queued|msg|template|media)_/i.test(rowId) || ['pending', 'sent'].includes(String(row?.status || '').toLowerCase());
+            });
+        }
+
         function appendLocalOutgoingMessage(waId, message) {
             if (!waId || !message) return null;
-            if (!Array.isArray(whatsappMessagesByContact[waId])) {
-                whatsappMessagesByContact[waId] = [];
-            }
             const normalizedWaId = normalizeWaId(waId);
+            if (!Array.isArray(whatsappMessagesByContact[normalizedWaId])) {
+                whatsappMessagesByContact[normalizedWaId] = [];
+            }
             const normalizedMessage = {
                 id: message.id || makeTempMessageId('msg'),
                 timestamp: message.timestamp || new Date().toISOString(),
@@ -1414,7 +1509,16 @@ lucide.createIcons();
                 statusTimestamp: message.statusTimestamp || new Date().toISOString(),
                 ...message
             };
-            whatsappMessagesByContact[waId].push(normalizedMessage);
+            const existingIndex = findWhatsappMessageIndex(normalizedWaId, normalizedMessage);
+            const reconcileIndex = existingIndex >= 0 ? existingIndex : findWhatsappOutgoingMatchIndex(normalizedWaId, normalizedMessage);
+            if (reconcileIndex >= 0) {
+                whatsappMessagesByContact[normalizedWaId][reconcileIndex] = {
+                    ...whatsappMessagesByContact[normalizedWaId][reconcileIndex],
+                    ...normalizedMessage
+                };
+            } else {
+                whatsappMessagesByContact[normalizedWaId].push(normalizedMessage);
+            }
             if (normalizedMessage.id) {
                 whatsappMessageStatusById[normalizedMessage.id] = {
                     status: normalizeMessageStatus(normalizedMessage.status),
@@ -1429,6 +1533,84 @@ lucide.createIcons();
                 applyContactFilter();
             }
             return normalizedMessage;
+        }
+
+        function updateLocalWhatsappMessage(waId, messageId, updates) {
+            const normalizedWaId = normalizeWaId(waId);
+            const rows = Array.isArray(whatsappMessagesByContact[normalizedWaId]) ? whatsappMessagesByContact[normalizedWaId] : [];
+            if (!normalizedWaId || !messageId || !rows.length) return false;
+            const index = rows.findIndex((row) => String(row?.id || '') === String(messageId || ''));
+            if (index < 0) return false;
+            rows[index] = {
+                ...rows[index],
+                ...updates
+            };
+            whatsappMessagesByContact[normalizedWaId] = rows;
+            const nextId = String(rows[index]?.id || '');
+            if (nextId) {
+                whatsappMessageStatusById[nextId] = {
+                    status: normalizeMessageStatus(rows[index]?.status),
+                    statusTimestamp: rows[index]?.statusTimestamp || rows[index]?.timestamp || new Date().toISOString()
+                };
+            }
+            return true;
+        }
+
+        async function processWhatsappTextSendQueue() {
+            if (whatsappTextSendProcessing) return;
+            whatsappTextSendProcessing = true;
+            while (whatsappTextSendQueue.length) {
+                const nextItem = whatsappTextSendQueue[0];
+                try {
+                    const res = await whatsappFetch('/api/whatsapp/send', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            waId: nextItem.waId,
+                            text: nextItem.text,
+                            contextMessageId: nextItem.contextMessageId || ''
+                        })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data?.ok) {
+                        throw new Error(data?.error || 'Send failed');
+                    }
+                    updateLocalWhatsappMessage(nextItem.waId, nextItem.tempId, {
+                        id: data?.id || nextItem.tempId,
+                        status: 'sent',
+                        statusTimestamp: new Date().toISOString()
+                    });
+                } catch (err) {
+                    console.error('Failed to send queued WhatsApp message:', err);
+                    updateLocalWhatsappMessage(nextItem.waId, nextItem.tempId, {
+                        status: 'failed',
+                        statusTimestamp: new Date().toISOString()
+                    });
+                } finally {
+                    whatsappTextSendQueue.shift();
+                    if (activeWhatsappWaId === nextItem.waId) {
+                        renderWhatsappMessages(nextItem.waId);
+                    }
+                    void loadWhatsappContacts();
+                }
+            }
+            whatsappTextSendProcessing = false;
+        }
+
+        function setChatSendState(isBusy, label) {
+            whatsappSendInFlight = Boolean(isBusy);
+            if (sendBtn) {
+                sendBtn.disabled = whatsappSendInFlight;
+                sendBtn.classList.toggle('is-loading', whatsappSendInFlight);
+                sendBtn.classList.toggle('is-disabled', whatsappSendInFlight);
+                sendBtn.setAttribute('aria-busy', whatsappSendInFlight ? 'true' : 'false');
+                sendBtn.title = whatsappSendInFlight ? (label || 'Sending...') : 'Send message';
+            }
+            if (notifyBtn) notifyBtn.disabled = whatsappSendInFlight;
+            if (attachFileBtn) attachFileBtn.disabled = whatsappSendInFlight;
+            if (chatInput) chatInput.readOnly = whatsappSendInFlight;
         }
 
         function getStatusTickHtml(rawStatus) {
@@ -1514,7 +1696,7 @@ lucide.createIcons();
                             ${bubbleBody}
                         </div>
                     </div>
-                    <span class="text-[10px] text-gray-400 mt-1 ${incoming ? 'ml-1' : 'mr-1'}">${formatChatTime(msg.timestamp)}${statusTick}</span>
+                    <span class="chat-message-meta text-[10px] text-gray-400 mt-1 ${incoming ? 'ml-1' : 'mr-1'}">${formatChatTime(msg.timestamp)}${statusTick}</span>
                 `;
                 chatMessages.appendChild(wrap);
             });
@@ -1592,12 +1774,12 @@ lucide.createIcons();
                         </div>
                         <div class="contact-side">
                             <span class="contact-last-time"></span>
-                            <button type="button" class="contact-menu-toggle" aria-label="Open contact options">&#9662;</button>
+                            <div class="contact-side-meta">
+                                <span class="contact-unread-dot hidden"></span>
+                                <span class="contact-unread-count hidden">0</span>
+                                <button type="button" class="contact-menu-toggle" aria-label="Open contact options">&#9662;</button>
+                            </div>
                         </div>
-                    </div>
-                    <div class="contact-card-footer">
-                        <span class="contact-unread-dot hidden"></span>
-                        <span class="contact-unread-count hidden">0</span>
                     </div>
                     <div class="contact-card-menu hidden">
                         <button type="button" class="contact-action-pin">Pin chat</button>
@@ -1610,9 +1792,9 @@ lucide.createIcons();
                                 <option value="tutor">Expert</option>
                                 <option value="friend">Client's Friend</option>
                                 <option value="useless">Broker</option>
-                                <option value="archived">Archive / Block</option>
                             </select>
                         </label>
+                        <button type="button" class="contact-action-archive">Archive chat</button>
                         <button type="button" class="contact-action-read">Mark as unread</button>
                     </div>
                 `;
@@ -1667,7 +1849,7 @@ lucide.createIcons();
             if (!Array.isArray(whatsappMessagesByContact[waId])) {
                 whatsappMessagesByContact[waId] = [];
             }
-            whatsappMessagesByContact[waId].push({
+            const nextMessage = {
                 id: payload.id || '',
                 text: payload.text || '',
                 timestamp: payload.timestamp || new Date().toISOString(),
@@ -1680,11 +1862,21 @@ lucide.createIcons();
                 replyTo: payload.replyTo || null,
                 status: normalizeMessageStatus(payload.status || whatsappMessageStatusById[payload.id || '']?.status),
                 statusTimestamp: payload.statusTimestamp || whatsappMessageStatusById[payload.id || '']?.statusTimestamp || payload.timestamp || new Date().toISOString()
-            });
+            };
+            const existingIndex = findWhatsappMessageIndex(waId, nextMessage);
+            const reconcileIndex = existingIndex >= 0 ? existingIndex : findWhatsappOutgoingMatchIndex(waId, nextMessage);
+            if (reconcileIndex >= 0) {
+                whatsappMessagesByContact[waId][reconcileIndex] = {
+                    ...whatsappMessagesByContact[waId][reconcileIndex],
+                    ...nextMessage
+                };
+            } else {
+                whatsappMessagesByContact[waId].push(nextMessage);
+            }
             upsertWhatsappContact({
                 waId: waId,
                 profileName: payload.profileName || waId
-            }, payload.direction === 'incoming' && activeWhatsappWaId !== waId);
+            }, payload.direction === 'incoming');
             const contactItem = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
             if (contactItem) {
                 contactItem.dataset.lastActivity = String(new Date(payload.timestamp || Date.now()).getTime() || Date.now());
@@ -1977,6 +2169,12 @@ lucide.createIcons();
 
         contactFilter.addEventListener('change', applyContactFilter);
         contactSearch.addEventListener('input', applyContactFilter);
+        if (toggleArchivedViewBtn) {
+            toggleArchivedViewBtn.addEventListener('click', () => {
+                archivedInboxMode = !archivedInboxMode;
+                applyContactFilter();
+            });
+        }
         applyContactFilter();
         restoreOrderListFromStorage();
         Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
@@ -2461,12 +2659,14 @@ lucide.createIcons();
             renderAttachmentQueue();
         }
 
-        document.getElementById('notifyBtn').onclick = async function() {
+        notifyBtn.onclick = async function() {
             if (!activeWhatsappWaId) {
                 alert('Select a WhatsApp contact first.');
                 return;
             }
+            if (whatsappSendInFlight) return;
             try {
+                setChatSendState(true, 'Sending template...');
                 const contactName = getActiveChatContactName();
                 const previewRes = await whatsappFetch('/api/whatsapp/initiate-preview', {
                     method: 'POST',
@@ -2508,23 +2708,17 @@ lucide.createIcons();
                     status: 'sent'
                 });
                 renderWhatsappMessages(activeWhatsappWaId);
-                await loadWhatsappContacts();
+                void loadWhatsappContacts();
             } catch (err) {
                 console.error('Failed to send chat initiation:', err);
-                appendLocalOutgoingMessage(activeWhatsappWaId, {
-                    id: makeTempMessageId('template_failed'),
-                    text: chatInput?.title || 'Chat initiation template',
-                    messageType: 'template',
-                    status: 'failed'
-                });
-                renderWhatsappMessages(activeWhatsappWaId);
                 alert('Chat initiation failed: ' + (err?.message || 'Unknown error'));
             } finally {
+                setChatSendState(false);
                 clearChatInitiationPreview();
             }
         };
         // Send Button
-        document.getElementById('sendBtn').onclick = async function() {
+        sendBtn.onclick = async function() {
             const text = (chatInput?.value || '').trim();
             if (!text && pendingAttachments.length === 0) return;
             if (!activeWhatsappWaId) {
@@ -2537,40 +2731,40 @@ lucide.createIcons();
                 return;
             }
 
+            const hadAttachments = pendingAttachments.length > 0;
             try {
                 const waId = normalizeWaId(activeWhatsappWaId);
-                const hadAttachments = pendingAttachments.length > 0;
                 if (hadAttachments) {
+                    if (whatsappSendInFlight) return;
+                    setChatSendState(true, 'Sending attachment...');
                     await sendPendingAttachments(waId, text);
-                }
-                if (text && !hadAttachments) {
-                    const res = await whatsappFetch('/api/whatsapp/send', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            waId,
-                            text: text,
-                            contextMessageId: activeReplyContext?.id || ''
-                        })
-                    });
-                    const data = await res.json();
-                    if (!res.ok || !data?.ok) {
-                        throw new Error(data?.error || 'Send failed');
-                    }
+                } else if (text) {
+                    const replyContextSnapshot = activeReplyContext ? { ...activeReplyContext } : null;
+                    const tempId = makeTempMessageId('queued');
                     appendLocalOutgoingMessage(activeWhatsappWaId, {
-                        id: data?.id || makeTempMessageId('msg'),
+                        id: tempId,
                         text,
                         messageType: 'text',
-                        replyTo: activeReplyContext ? { ...activeReplyContext } : null,
-                        status: 'sent'
+                        replyTo: replyContextSnapshot,
+                        status: 'pending',
+                        statusTimestamp: new Date().toISOString()
                     });
+                    renderWhatsappMessages(activeWhatsappWaId);
+                    chatInput.value = '';
+                    setReplyContext(null);
+                    whatsappTextSendQueue.push({
+                        waId,
+                        tempId,
+                        text,
+                        contextMessageId: replyContextSnapshot?.id || ''
+                    });
+                    void processWhatsappTextSendQueue();
+                    return;
                 }
                 renderWhatsappMessages(activeWhatsappWaId);
                 chatInput.value = '';
                 setReplyContext(null);
-                await loadWhatsappContacts();
+                void loadWhatsappContacts();
             } catch (err) {
                 console.error('Failed to send WhatsApp message:', err);
                 const reason = err?.message || 'Unknown send error';
@@ -2585,13 +2779,15 @@ lucide.createIcons();
                     renderWhatsappMessages(activeWhatsappWaId);
                 }
                 alert('Message send failed: ' + reason);
+            } finally {
+                if (hadAttachments) setChatSendState(false);
             }
         };
         if (chatInput) {
             chatInput.addEventListener('keydown', function(event) {
                 if (event.key !== 'Enter' || event.shiftKey) return;
                 event.preventDefault();
-                document.getElementById('sendBtn').click();
+                sendBtn.click();
             });
         }
         document.addEventListener('click', function(event) {
