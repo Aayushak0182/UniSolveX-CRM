@@ -88,6 +88,7 @@ lucide.createIcons();
         const WHATSAPP_DEBUG_POLL_INTERVAL_MS = 8000;
         const WHATSAPP_CHAT_WINDOW_MS = 24 * 60 * 60 * 1000;
         const WHATSAPP_WINDOW_TICK_MS = 30000;
+        const CRM_STATE_SAVE_DEBOUNCE_MS = 500;
         const whatsappMessagesByContact = {};
         const whatsappMessageStatusById = {};
         let whatsappPollingTimer = null;
@@ -111,6 +112,7 @@ lucide.createIcons();
         let activeOrderTab = 'mine';
         let activeClientDetailsWaId = '';
         let clientDetailsEditMode = false;
+        let crmStateSaveTimer = null;
 
         function applyTheme(theme) {
             const nextTheme = theme === 'dark' ? 'dark' : 'light';
@@ -313,8 +315,120 @@ lucide.createIcons();
             lucide.createIcons();
         }
 
-        function persistOrderListToStorage() {
+        function persistOrderListToStorage(skipRemote) {
             localStorage.setItem(ORDER_LIST_STORAGE_KEY, orderList.innerHTML);
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
+        function getStoredWhatsappContactIdSequence() {
+            return Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
+        }
+
+        function setWhatsappContactIdSequenceInStorage(value, skipRemote) {
+            localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(value));
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
+        function getCurrentCrmStatePayload() {
+            const rawSequence = Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
+            return {
+                orderListHtml: localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '',
+                manualContacts: readManualContactsFromStorage(),
+                whatsappContactIdMap: readWhatsappContactIdMapFromStorage(),
+                whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100
+            };
+        }
+
+        async function persistCrmStateToBackend() {
+            const payload = getCurrentCrmStatePayload();
+            try {
+                const res = await whatsappFetch('/api/crm/state', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    throw new Error('CRM state save failed with status ' + res.status);
+                }
+            } catch (err) {
+                console.warn('Failed to persist CRM state to backend:', err);
+            }
+        }
+
+        function scheduleCrmStateSave() {
+            if (crmStateSaveTimer) {
+                clearTimeout(crmStateSaveTimer);
+            }
+            crmStateSaveTimer = setTimeout(() => {
+                crmStateSaveTimer = null;
+                persistCrmStateToBackend();
+            }, CRM_STATE_SAVE_DEBOUNCE_MS);
+        }
+
+        function rehydrateOrderCardsFromDom() {
+            Object.keys(orderSequenceByClient).forEach((key) => {
+                delete orderSequenceByClient[key];
+            });
+            Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
+                syncOrderServiceTag(card);
+                syncOrderPaymentIndicator(card);
+                applyCardTypeStyle(card, card.dataset.serviceType || card.querySelector('.order-title')?.textContent || '');
+                applyDeadlineStyles(card);
+                const cardClientId = (card.dataset.clientId || '').replace(/\D/g, '');
+                const cardOrderId = (card.querySelector('.order-id')?.textContent || '').replace(/[^\d]/g, '');
+                if (!cardClientId || !cardOrderId || !cardOrderId.startsWith(cardClientId)) return;
+                const suffix = Number(cardOrderId.slice(cardClientId.length));
+                if (!Number.isFinite(suffix)) return;
+                orderSequenceByClient[cardClientId] = Math.max(orderSequenceByClient[cardClientId] || 1009, suffix);
+            });
+            applyOrderSearchFilter();
+        }
+
+        async function hydrateCrmStateFromBackend() {
+            try {
+                const res = await whatsappFetch('/api/crm/state');
+                if (!res.ok) {
+                    throw new Error('CRM state load failed with status ' + res.status);
+                }
+                const data = await res.json();
+                const state = data?.state && typeof data.state === 'object' ? data.state : null;
+                if (!state) return false;
+
+                const hasRemoteState =
+                    typeof state.orderListHtml === 'string' ||
+                    Array.isArray(state.manualContacts) ||
+                    (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
+                    Number.isFinite(Number(state.whatsappContactIdSequence));
+
+                if (!hasRemoteState) return false;
+
+                localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
+                localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.manualContacts) ? state.manualContacts : []));
+                localStorage.setItem(
+                    WHATSAPP_CONTACT_ID_MAP_KEY,
+                    JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
+                );
+                setWhatsappContactIdSequenceInStorage(
+                    Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
+                    true
+                );
+
+                orderList.innerHTML = '';
+                restoreOrderListFromStorage();
+                rehydrateOrderCardsFromDom();
+                restoreManualContactsFromStorage();
+                scheduleContactOrderRefresh();
+                return true;
+            } catch (err) {
+                console.warn('Failed to hydrate CRM state from backend:', err);
+                return false;
+            }
         }
 
         function getNextOrderId(clientId) {
@@ -676,8 +790,11 @@ lucide.createIcons();
             }
         }
 
-        function writeManualContactsToStorage(rows) {
+        function writeManualContactsToStorage(rows, skipRemote) {
             localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(rows));
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
         }
 
         function saveManualContact(contact) {
@@ -726,16 +843,19 @@ lucide.createIcons();
             }
         }
 
-        function writeWhatsappContactIdMapToStorage(map) {
+        function writeWhatsappContactIdMapToStorage(map, skipRemote) {
             localStorage.setItem(WHATSAPP_CONTACT_ID_MAP_KEY, JSON.stringify(map));
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
         }
 
         function getNextWhatsappContactIdValue(map) {
-            const stored = Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
+            const stored = getStoredWhatsappContactIdSequence();
             const mapIds = Object.values(map).map((value) => Number(value)).filter((value) => Number.isFinite(value));
             const maxMapId = mapIds.length ? Math.max(...mapIds) : 100100;
             const next = Math.max(stored, maxMapId) + 1;
-            localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(next));
+            setWhatsappContactIdSequenceInStorage(next);
             return next;
         }
 
@@ -743,14 +863,14 @@ lucide.createIcons();
             const map = readWhatsappContactIdMapFromStorage();
             const entries = Object.entries(map);
             if (!entries.length) {
-                localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(100100));
+                setWhatsappContactIdSequenceInStorage(100100);
                 return;
             }
 
             const shouldMigrate = entries.some((entry) => Number(entry[1]) < 100101);
             if (!shouldMigrate) {
                 const maxExisting = Math.max(...entries.map((entry) => Number(entry[1])).filter((value) => Number.isFinite(value)));
-                localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(maxExisting));
+                setWhatsappContactIdSequenceInStorage(maxExisting);
                 return;
             }
 
@@ -765,7 +885,7 @@ lucide.createIcons();
                 });
 
             writeWhatsappContactIdMapToStorage(migrated);
-            localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(nextId - 1));
+            setWhatsappContactIdSequenceInStorage(nextId - 1);
         }
 
         function getOrCreateWhatsappContactId(waId) {
@@ -2090,6 +2210,11 @@ lucide.createIcons();
         restoreManualContactsFromStorage();
         scheduleContactOrderRefresh();
         initWhatsappSync();
+        void hydrateCrmStateFromBackend().then((loaded) => {
+            if (!loaded) {
+                scheduleCrmStateSave();
+            }
+        });
         if (chatHeaderAvatar) chatHeaderAvatar.textContent = '?';
         updateChatHeaderVisibility('');
         setClientDetailsEditMode(false);
@@ -2183,18 +2308,7 @@ lucide.createIcons();
         }
         applyContactFilter();
         restoreOrderListFromStorage();
-        Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
-            syncOrderServiceTag(card);
-            syncOrderPaymentIndicator(card);
-            applyCardTypeStyle(card, card.dataset.serviceType || card.querySelector('.order-title')?.textContent || '');
-            applyDeadlineStyles(card);
-            const cardClientId = (card.dataset.clientId || '').replace(/\D/g, '');
-            const cardOrderId = (card.querySelector('.order-id')?.textContent || '').replace(/[^\d]/g, '');
-            if (!cardClientId || !cardOrderId || !cardOrderId.startsWith(cardClientId)) return;
-            const suffix = Number(cardOrderId.slice(cardClientId.length));
-            if (!Number.isFinite(suffix)) return;
-            orderSequenceByClient[cardClientId] = Math.max(orderSequenceByClient[cardClientId] || 1009, suffix);
-        });
+        rehydrateOrderCardsFromDom();
         if (!localStorage.getItem(ORDER_LIST_STORAGE_KEY)) {
             persistOrderListToStorage();
         }
@@ -2206,7 +2320,6 @@ lucide.createIcons();
             if (!btn) return;
             btn.addEventListener('click', () => setOrderTab(btn.dataset.orderTab || 'mine'));
         });
-        applyOrderSearchFilter();
         applyExpertDeadlineConstraint();
         if (odActualDeadlineInput) {
             odActualDeadlineInput.addEventListener('input', applyExpertDeadlineConstraint);

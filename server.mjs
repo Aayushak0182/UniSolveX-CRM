@@ -38,6 +38,13 @@ const messageStatusById = new Map();
 const sockets = new Set();
 const webhookEvents = [];
 const apiEvents = [];
+const crmState = {
+    orderListHtml: '',
+    manualContacts: [],
+    whatsappContactIdMap: {},
+    whatsappContactIdSequence: 100100,
+    updatedAt: ''
+};
 
 let firebaseDb = null;
 let firebaseBucket = null;
@@ -49,6 +56,8 @@ let lastPersistedStateLoadAt = '';
 let lastPersistedStateError = '';
 let lastFirebaseWriteAt = '';
 let lastFirebaseWriteError = '';
+let crmStateLoaded = false;
+let crmStateLoadInFlight = null;
 
 let loggedMissingAppSecret = false;
 let loggedMissingFirebasePersistence = false;
@@ -285,6 +294,89 @@ async function persistMessageStatusSnapshot(waId, messageId, status, statusTimes
         lastFirebaseWriteError = error?.message || 'Failed to persist message status snapshot';
         throw error;
     }
+}
+
+function normalizeCrmStatePayload(payload = {}) {
+    const nextManualContacts = Array.isArray(payload.manualContacts)
+        ? payload.manualContacts
+            .filter((row) => row && typeof row === 'object')
+            .map((row) => ({
+                waId: normalizeWaId(row.waId || ''),
+                profileName: String(row.profileName || ''),
+                tag: String(row.tag || ''),
+                universityName: String(row.universityName || ''),
+                semester: String(row.semester || ''),
+                timezone: String(row.timezone || '')
+            }))
+            .filter((row) => row.waId)
+        : crmState.manualContacts;
+    const nextContactIdMap = payload.whatsappContactIdMap && typeof payload.whatsappContactIdMap === 'object'
+        ? Object.fromEntries(
+            Object.entries(payload.whatsappContactIdMap)
+                .map(([key, value]) => [normalizeWaId(key), String(value || '').trim()])
+                .filter(([key, value]) => key && value)
+        )
+        : crmState.whatsappContactIdMap;
+    const nextSequence = Number(payload.whatsappContactIdSequence);
+    return {
+        orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
+        manualContacts: nextManualContacts,
+        whatsappContactIdMap: nextContactIdMap,
+        whatsappContactIdSequence: Number.isFinite(nextSequence) && nextSequence > 0
+            ? nextSequence
+            : crmState.whatsappContactIdSequence,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+async function loadPersistedCrmState() {
+    if (!initFirebasePersistence()) return false;
+    const snapshot = await firebaseDb.collection('crm_meta').doc('ui_state').get();
+    if (!snapshot.exists) {
+        crmStateLoaded = true;
+        crmState.updatedAt = new Date().toISOString();
+        return true;
+    }
+    const data = snapshot.data() || {};
+    const nextState = normalizeCrmStatePayload(data);
+    crmState.orderListHtml = nextState.orderListHtml;
+    crmState.manualContacts = nextState.manualContacts;
+    crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
+    crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
+    crmState.updatedAt = String(data.updatedAt || nextState.updatedAt);
+    crmStateLoaded = true;
+    return true;
+}
+
+async function ensureCrmStateLoaded(forceRefresh = false) {
+    if (crmStateLoadInFlight) return crmStateLoadInFlight;
+    if (!forceRefresh && crmStateLoaded) return true;
+    if (!initFirebasePersistence()) return false;
+    crmStateLoadInFlight = loadPersistedCrmState()
+        .finally(() => {
+            crmStateLoadInFlight = null;
+        });
+    return crmStateLoadInFlight;
+}
+
+async function persistCrmState(partialPayload = {}) {
+    const nextState = normalizeCrmStatePayload({
+        ...crmState,
+        ...partialPayload
+    });
+    crmState.orderListHtml = nextState.orderListHtml;
+    crmState.manualContacts = nextState.manualContacts;
+    crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
+    crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
+    crmState.updatedAt = nextState.updatedAt;
+    if (!initFirebasePersistence()) {
+        warnMissingFirebasePersistenceOnce();
+        return false;
+    }
+    await firebaseDb.collection('crm_meta').doc('ui_state').set(nextState, { merge: true });
+    lastFirebaseWriteAt = new Date().toISOString();
+    lastFirebaseWriteError = '';
+    return true;
 }
 
 function findExistingMessageIndex(waId, candidateMessage) {
@@ -995,6 +1087,14 @@ app.get('/api/whatsapp/debug', (_req, res) => {
     res.json({
         ok: true,
         persistence,
+        crmState: {
+            loaded: crmStateLoaded,
+            updatedAt: crmState.updatedAt,
+            manualContacts: crmState.manualContacts.length,
+            hasOrderListHtml: Boolean(crmState.orderListHtml),
+            contactIdMapSize: Object.keys(crmState.whatsappContactIdMap || {}).length,
+            contactIdSequence: crmState.whatsappContactIdSequence
+        },
         contacts: contactsByWaId.size,
         messageThreads: messagesByWaId.size,
         recentWebhookEvents: webhookEvents.slice(0, 20),
@@ -1044,6 +1144,39 @@ app.get('/api/whatsapp/contacts', async (_req, res) => {
             })
         }));
     res.json(rows);
+});
+
+app.get('/api/crm/state', async (_req, res) => {
+    try {
+        await ensureCrmStateLoaded(false);
+    } catch (error) {
+        console.warn('[storage] Failed to load CRM state:', error?.message || error);
+    }
+    res.json({
+        ok: true,
+        orderListHtml: crmState.orderListHtml,
+        manualContacts: crmState.manualContacts,
+        whatsappContactIdMap: crmState.whatsappContactIdMap,
+        whatsappContactIdSequence: crmState.whatsappContactIdSequence,
+        updatedAt: crmState.updatedAt
+    });
+});
+
+app.post('/api/crm/state', async (req, res) => {
+    try {
+        await persistCrmState(req.body || {});
+        return res.json({
+            ok: true,
+            orderListHtml: crmState.orderListHtml,
+            manualContacts: crmState.manualContacts,
+            whatsappContactIdMap: crmState.whatsappContactIdMap,
+            whatsappContactIdSequence: crmState.whatsappContactIdSequence,
+            updatedAt: crmState.updatedAt
+        });
+    } catch (error) {
+        lastFirebaseWriteError = error?.message || 'Failed to persist CRM state';
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to persist CRM state' });
+    }
 });
 
 app.post('/api/whatsapp/send', async (req, res) => {
@@ -1496,6 +1629,7 @@ app.use((error, _req, res, next) => {
 try {
     if (initFirebasePersistence()) {
         await ensurePersistedStateLoaded(true);
+        await ensureCrmStateLoaded(true);
         console.log('[storage] Firebase persistence enabled.');
         if (firebaseBucket) {
             console.log('[storage] Media backup bucket:', firebaseBucket.name);
