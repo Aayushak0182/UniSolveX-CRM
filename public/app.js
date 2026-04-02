@@ -1876,7 +1876,7 @@ lucide.createIcons();
                         ${forwardMode ? `<input class="chat-forward-check" type="checkbox" data-forward-id="${escapeHtml(clientKey)}" ${forwardSelectionIds.has(clientKey) ? 'checked' : ''}>` : ''}
                         <button type="button" class="chat-message-menu-btn" data-menu-id="${escapeHtml(clientKey)}">&#9662;</button>
                         ${openMessageMenuId === clientKey ? `
-                            <div class="chat-message-menu">
+                            <div class="chat-message-menu ${incoming ? 'chat-message-menu-open-right' : 'chat-message-menu-open-left'}">
                                 <button type="button" data-action="reply" data-message-key="${escapeHtml(clientKey)}">Reply</button>
                                 <button type="button" data-action="forward" data-message-key="${escapeHtml(clientKey)}">Forward</button>
                             </div>

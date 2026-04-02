@@ -101,3 +101,37 @@ What this does:
 - If `FIREBASE_STORAGE_BUCKET` is configured, outgoing media and incoming media backups are uploaded and their URLs are stored with the message
 
 Without Firebase envs, the app falls back to in-memory storage only.
+
+## AI Agent (WhatsApp auto-reply + pricing handoff)
+
+The backend now supports an AI auto-reply flow for WhatsApp.
+
+Behavior:
+
+- AI can auto-reply to inbound WhatsApp messages
+- AI keeps talking to the client
+- If the client asks for price / quotation / charges / fees / payment, the chat is handed off to a human
+- If `AI_AGENT_ONLY_FIRST_TIME_CLIENTS=true`, only new leads are auto-enrolled into AI handling
+
+Set these backend env vars:
+
+```env
+AI_AGENT_ENABLED=true
+AI_AGENT_PROVIDER=gemini
+AI_AGENT_MODEL=gemini-2.5-flash
+GEMINI_API_KEY=your_gemini_api_key
+
+# optional but recommended
+AI_AGENT_ONLY_FIRST_TIME_CLIENTS=true
+AI_AGENT_HUMAN_QUEUE_NAME=Sales Team
+AI_AGENT_HANDOFF_MESSAGE=I am transferring you to a human agent for pricing and final quotation.
+AI_AGENT_TONE_GUIDE=Friendly, concise, helpful, and professional.
+AI_AGENT_BUSINESS_CONTEXT=Describe your company, services, process, and what the AI is allowed to say.
+AI_AGENT_SERVICE_CATALOG=List your supported services, categories, and non-pricing guidance.
+AI_AGENT_MAX_REPLIES_PER_LEAD=12
+```
+
+Useful debug endpoints:
+
+- `/api/ai-agent/debug`
+- `/api/whatsapp/debug`

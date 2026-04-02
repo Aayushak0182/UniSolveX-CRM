@@ -19,6 +19,17 @@ const firebaseServiceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || 
 const firebaseServiceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '';
 const firebaseStorageBucketName = process.env.FIREBASE_STORAGE_BUCKET || '';
 const whatsappMediaStoragePrefix = process.env.WHATSAPP_MEDIA_STORAGE_PREFIX || 'whatsapp-media';
+const aiAgentEnabled = /^(1|true|yes|on)$/i.test(process.env.AI_AGENT_ENABLED || '');
+const aiAgentProvider = String(process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
+const aiAgentModel = String(process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
+const aiAgentApiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const aiAgentOnlyFirstTimeClients = !/^(0|false|no|off)$/i.test(process.env.AI_AGENT_ONLY_FIRST_TIME_CLIENTS || 'true');
+const aiAgentHumanQueueName = String(process.env.AI_AGENT_HUMAN_QUEUE_NAME || 'Human Agent').trim() || 'Human Agent';
+const aiAgentHandoffMessage = String(process.env.AI_AGENT_HANDOFF_MESSAGE || 'I am transferring you to a human agent for pricing and final quotation.').trim();
+const aiAgentBusinessContext = String(process.env.AI_AGENT_BUSINESS_CONTEXT || '').trim();
+const aiAgentServiceCatalog = String(process.env.AI_AGENT_SERVICE_CATALOG || '').trim();
+const aiAgentToneGuide = String(process.env.AI_AGENT_TONE_GUIDE || 'Friendly, concise, helpful, professional, and clear.').trim();
+const aiAgentMaxRepliesPerLead = Math.max(1, Number(process.env.AI_AGENT_MAX_REPLIES_PER_LEAD || 12) || 12);
 
 app.use(cors());
 app.disable('x-powered-by');
@@ -38,6 +49,8 @@ const messageStatusById = new Map();
 const sockets = new Set();
 const webhookEvents = [];
 const apiEvents = [];
+const aiStateByWaId = new Map();
+const aiReplyQueueByWaId = new Map();
 const crmState = {
     orderListHtml: '',
     manualContacts: [],
@@ -390,6 +403,180 @@ async function persistCrmState(partialPayload = {}) {
     return true;
 }
 
+function normalizeAiContactState(payload = {}, waId = '') {
+    const normalizedWaId = normalizeWaId(payload.waId || waId || '');
+    const existing = aiStateByWaId.get(normalizedWaId) || {};
+    return {
+        waId: normalizedWaId,
+        profileName: String(payload.profileName || existing.profileName || normalizedWaId),
+        firstInboundAt: String(payload.firstInboundAt || existing.firstInboundAt || ''),
+        enrolledAt: String(payload.enrolledAt || existing.enrolledAt || ''),
+        aiEnabled: typeof payload.aiEnabled === 'boolean' ? payload.aiEnabled : (typeof existing.aiEnabled === 'boolean' ? existing.aiEnabled : true),
+        handoffToHuman: typeof payload.handoffToHuman === 'boolean' ? payload.handoffToHuman : Boolean(existing.handoffToHuman),
+        handoffReason: String(payload.handoffReason || existing.handoffReason || ''),
+        humanAssignedTo: String(payload.humanAssignedTo || existing.humanAssignedTo || ''),
+        lastAiReplyAt: String(payload.lastAiReplyAt || existing.lastAiReplyAt || ''),
+        lastClientMessageAt: String(payload.lastClientMessageAt || existing.lastClientMessageAt || ''),
+        aiReplyCount: Math.max(0, Number(payload.aiReplyCount ?? existing.aiReplyCount ?? 0) || 0),
+        lastIntent: String(payload.lastIntent || existing.lastIntent || ''),
+        existingClientSkipped: typeof payload.existingClientSkipped === 'boolean' ? payload.existingClientSkipped : Boolean(existing.existingClientSkipped),
+        updatedAt: String(payload.updatedAt || new Date().toISOString())
+    };
+}
+
+async function loadPersistedAiState(waId) {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId || !initFirebasePersistence()) return null;
+    const snapshot = await firebaseDb.collection('crm_ai_contacts').doc(normalizedWaId).get();
+    if (!snapshot.exists) return null;
+    const nextState = normalizeAiContactState(snapshot.data() || {}, normalizedWaId);
+    aiStateByWaId.set(normalizedWaId, nextState);
+    return nextState;
+}
+
+async function ensureAiContactState(waId, profileName = '') {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId) return null;
+    const existing = aiStateByWaId.get(normalizedWaId);
+    if (existing) return existing;
+    const persisted = await loadPersistedAiState(normalizedWaId);
+    if (persisted) return persisted;
+    const nextState = normalizeAiContactState({ waId: normalizedWaId, profileName }, normalizedWaId);
+    aiStateByWaId.set(normalizedWaId, nextState);
+    return nextState;
+}
+
+async function persistAiContactState(partialPayload = {}) {
+    const normalizedWaId = normalizeWaId(partialPayload.waId || '');
+    if (!normalizedWaId) return null;
+    const nextState = normalizeAiContactState(partialPayload, normalizedWaId);
+    aiStateByWaId.set(normalizedWaId, nextState);
+    if (!initFirebasePersistence()) {
+        warnMissingFirebasePersistenceOnce();
+        return nextState;
+    }
+    await firebaseDb.collection('crm_ai_contacts').doc(normalizedWaId).set(nextState, { merge: true });
+    lastFirebaseWriteAt = new Date().toISOString();
+    lastFirebaseWriteError = '';
+    return nextState;
+}
+
+function extractTextFromGeminiResponse(data) {
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) return '';
+    return parts
+        .map((part) => String(part?.text || ''))
+        .join('\n')
+        .trim();
+}
+
+function safeParseJsonObject(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        try {
+            return JSON.parse(match[0]);
+        } catch {
+            return null;
+        }
+    }
+}
+
+function isPricingIntent(text) {
+    const value = String(text || '').toLowerCase();
+    if (!value) return false;
+    return [
+        'price', 'pricing', 'quotation', 'quote', 'how much', 'cost', 'charges',
+        'fee', 'fees', 'budget', 'discount', 'payment', 'rate', 'rates'
+    ].some((term) => value.includes(term));
+}
+
+function buildAiConversationTranscript(waId, limit = 16) {
+    const thread = messagesByWaId.get(normalizeWaId(waId)) || [];
+    return thread
+        .slice(-limit)
+        .map((message) => {
+            const speaker = message.direction === 'incoming'
+                ? 'Client'
+                : (String(message.senderType || '').toLowerCase() === 'ai' ? 'AI Agent' : 'Human Agent');
+            const type = message.messageType && message.messageType !== 'text' ? ` (${message.messageType})` : '';
+            const text = String(message.text || message.attachmentName || '[empty]').trim();
+            return `${speaker}${type}: ${text}`;
+        })
+        .join('\n');
+}
+
+async function generateAiAgentDecision({ waId, profileName, latestMessageText, aiState }) {
+    if (!aiAgentApiKey) {
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for AI agent replies');
+    }
+    if (aiAgentProvider !== 'gemini') {
+        throw new Error(`Unsupported AI agent provider "${aiAgentProvider}". Set AI_AGENT_PROVIDER=gemini.`);
+    }
+
+    const transcript = buildAiConversationTranscript(waId);
+    const prompt = [
+        'You are UniSolvex CRM WhatsApp AI agent.',
+        `Tone guide: ${aiAgentToneGuide}`,
+        aiAgentBusinessContext ? `Business context:\n${aiAgentBusinessContext}` : '',
+        aiAgentServiceCatalog ? `Service catalog:\n${aiAgentServiceCatalog}` : '',
+        'Rules:',
+        '- Reply naturally, briefly, and helpfully.',
+        '- Never provide any price, quote, fee, discount, budget, or payment commitment.',
+        '- If the user asks about pricing, quotation, charges, fees, budget, discount, or payment, set handoffToHuman=true.',
+        '- If the user is clearly asking for quotation or negotiation, stop AI handling and hand off to a human.',
+        '- If you do not understand the request, set handoffToHuman=true.',
+        '- Do not mention internal policies or JSON.',
+        '- Prefer asking one useful follow-up question at a time when more detail is needed.',
+        '',
+        `Client name: ${profileName || waId}`,
+        `Latest client message: ${latestMessageText || ''}`,
+        `AI replies so far: ${aiState?.aiReplyCount || 0}`,
+        'Conversation transcript:',
+        transcript || '(no prior messages)',
+        '',
+        'Return JSON only with this shape:',
+        '{"shouldReply":true,"replyText":"...","handoffToHuman":false,"handoffReason":"","intent":"...","confidence":0.0}'
+    ].filter(Boolean).join('\n');
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [{
+                role: 'user',
+                parts: [{ text: prompt }]
+            }],
+            generationConfig: {
+                temperature: 0.5,
+                responseMimeType: 'application/json'
+            }
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || 'Gemini generateContent failed');
+    }
+    const parsed = safeParseJsonObject(extractTextFromGeminiResponse(data));
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Error('AI agent returned invalid JSON response');
+    }
+    return {
+        shouldReply: parsed.shouldReply !== false,
+        replyText: String(parsed.replyText || '').trim(),
+        handoffToHuman: Boolean(parsed.handoffToHuman),
+        handoffReason: String(parsed.handoffReason || '').trim(),
+        intent: String(parsed.intent || '').trim(),
+        confidence: Number(parsed.confidence || 0) || 0
+    };
+}
+
 function findExistingMessageIndex(waId, candidateMessage) {
     const thread = messagesByWaId.get(waId) || [];
     const candidateId = String(candidateMessage?.id || '').trim();
@@ -424,6 +611,7 @@ function mergePersistedMessageIntoMemory(waId, message) {
         text: String(message.text || ''),
         timestamp: String(message.timestamp || new Date().toISOString()),
         direction: String(message.direction || 'incoming'),
+        senderType: String(message.senderType || ''),
         messageType: String(message.messageType || 'text'),
         attachmentName: String(message.attachmentName || ''),
         attachmentUrl: String(message.attachmentUrl || ''),
@@ -674,6 +862,203 @@ function updateMessageStatus(waId, messageId, status, statusTimestamp) {
         messagesByWaId.set(waId, thread);
     }
     return updated;
+}
+
+async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', senderType = 'human', route = 'send' }) {
+    const normalizedWaId = normalizeWaId(waId);
+    const bodyText = String(text || '').trim();
+    const replyContextId = String(contextMessageId || '').trim();
+    if (!normalizedWaId || !bodyText) {
+        throw new Error('waId and text are required');
+    }
+    ensureWhatsappConfig();
+    pushApiEvent({
+        at: new Date().toISOString(),
+        route,
+        waId: normalizedWaId,
+        type: 'text',
+        senderType,
+        text: bodyText,
+        contextMessageId: replyContextId
+    });
+    const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+        messaging_product: 'whatsapp',
+        to: normalizedWaId,
+        type: 'text',
+        text: { body: bodyText },
+        ...(replyContextId ? { context: { message_id: replyContextId } } : {})
+    });
+
+    const profileName = contactsByWaId.get(normalizedWaId)?.profileName || normalizedWaId;
+    const timestamp = new Date().toISOString();
+    const messageId = result?.messages?.[0]?.id || '';
+    const replyTo = makeReplyReference(normalizedWaId, replyContextId);
+    const contact = upsertContact(normalizedWaId, profileName);
+    const storedMessage = {
+        id: messageId,
+        direction: 'outgoing',
+        senderType,
+        text: bodyText,
+        timestamp,
+        replyTo,
+        status: 'sent',
+        statusTimestamp: timestamp
+    };
+    addMessage(normalizedWaId, storedMessage);
+    await persistContactSnapshot(contact);
+    await persistMessageSnapshot(normalizedWaId, storedMessage);
+    pushApiEvent({
+        at: timestamp,
+        route,
+        waId: normalizedWaId,
+        type: 'text',
+        senderType,
+        ok: true,
+        messageId
+    });
+    broadcast({
+        type: 'whatsapp_message',
+        payload: {
+            waId: normalizedWaId,
+            profileName,
+            id: messageId,
+            direction: 'outgoing',
+            senderType,
+            text: bodyText,
+            timestamp,
+            replyTo,
+            status: 'sent',
+            statusTimestamp: timestamp
+        }
+    });
+    return { ok: true, id: messageId, timestamp, profileName };
+}
+
+async function handleAiAgentForIncomingMessage({ waId, profileName, text, timestamp, messageId, messageType }) {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!aiAgentEnabled || !normalizedWaId) return;
+    const queued = aiReplyQueueByWaId.get(normalizedWaId) || Promise.resolve();
+    const nextJob = queued
+        .catch(() => {})
+        .then(async () => {
+            const currentState = await ensureAiContactState(normalizedWaId, profileName);
+            if (!currentState) return;
+            const nextState = {
+                ...currentState,
+                profileName: profileName || currentState.profileName || normalizedWaId,
+                firstInboundAt: currentState.firstInboundAt || timestamp,
+                lastClientMessageAt: timestamp,
+                updatedAt: new Date().toISOString()
+            };
+
+            if (!nextState.enrolledAt) {
+                const thread = messagesByWaId.get(normalizedWaId) || [];
+                const priorOutgoingCount = thread.filter((row) => row?.direction === 'outgoing').length;
+                if (aiAgentOnlyFirstTimeClients && priorOutgoingCount > 0) {
+                    await persistAiContactState({
+                        ...nextState,
+                        aiEnabled: false,
+                        existingClientSkipped: true,
+                        handoffReason: 'existing_client'
+                    });
+                    return;
+                }
+                nextState.enrolledAt = timestamp;
+            }
+
+            if (nextState.handoffToHuman || nextState.aiEnabled === false) {
+                await persistAiContactState(nextState);
+                return;
+            }
+
+            if ((nextState.aiReplyCount || 0) >= aiAgentMaxRepliesPerLead) {
+                await persistAiContactState({
+                    ...nextState,
+                    handoffToHuman: true,
+                    handoffReason: 'max_ai_replies',
+                    humanAssignedTo: aiAgentHumanQueueName
+                });
+                await sendWhatsappTextMessage({
+                    waId: normalizedWaId,
+                    text: aiAgentHandoffMessage,
+                    contextMessageId: messageId,
+                    senderType: 'ai',
+                    route: 'ai-handoff'
+                });
+                return;
+            }
+
+            if (isPricingIntent(text)) {
+                await persistAiContactState({
+                    ...nextState,
+                    handoffToHuman: true,
+                    handoffReason: 'pricing_request',
+                    lastIntent: 'pricing',
+                    humanAssignedTo: aiAgentHumanQueueName
+                });
+                await sendWhatsappTextMessage({
+                    waId: normalizedWaId,
+                    text: aiAgentHandoffMessage,
+                    contextMessageId: messageId,
+                    senderType: 'ai',
+                    route: 'ai-handoff'
+                });
+                return;
+            }
+
+            const latestMessageText = String(text || '').trim() || `[${String(messageType || 'message')}]`;
+            const decision = await generateAiAgentDecision({
+                waId: normalizedWaId,
+                profileName,
+                latestMessageText,
+                aiState: nextState
+            });
+
+            if (decision.handoffToHuman || !decision.replyText) {
+                await persistAiContactState({
+                    ...nextState,
+                    handoffToHuman: true,
+                    handoffReason: decision.handoffReason || 'needs_human',
+                    lastIntent: decision.intent || nextState.lastIntent,
+                    humanAssignedTo: aiAgentHumanQueueName
+                });
+                await sendWhatsappTextMessage({
+                    waId: normalizedWaId,
+                    text: aiAgentHandoffMessage,
+                    contextMessageId: messageId,
+                    senderType: 'ai',
+                    route: 'ai-handoff'
+                });
+                return;
+            }
+
+            if (!decision.shouldReply) {
+                await persistAiContactState({
+                    ...nextState,
+                    lastIntent: decision.intent || nextState.lastIntent
+                });
+                return;
+            }
+
+            await sendWhatsappTextMessage({
+                waId: normalizedWaId,
+                text: decision.replyText,
+                contextMessageId: messageId,
+                senderType: 'ai',
+                route: 'ai-reply'
+            });
+            await persistAiContactState({
+                ...nextState,
+                aiReplyCount: Number(nextState.aiReplyCount || 0) + 1,
+                lastAiReplyAt: new Date().toISOString(),
+                lastIntent: decision.intent || nextState.lastIntent
+            });
+        });
+    aiReplyQueueByWaId.set(normalizedWaId, nextJob.finally(() => {
+        if (aiReplyQueueByWaId.get(normalizedWaId) === nextJob) {
+            aiReplyQueueByWaId.delete(normalizedWaId);
+        }
+    }));
 }
 
 function broadcast(payload) {
@@ -1023,6 +1408,16 @@ app.post('/webhook', (req, res) => {
                         replyTo
                     }
                 });
+                void handleAiAgentForIncomingMessage({
+                    waId,
+                    profileName,
+                    text,
+                    timestamp,
+                    messageId: incomingMessage.id || '',
+                    messageType: storedMessage.messageType || 'text'
+                }).catch((error) => {
+                    console.warn('[ai-agent] Failed to process incoming message:', error?.message || error);
+                });
             });
 
             statuses.forEach((statusEvent) => {
@@ -1107,6 +1502,13 @@ app.get('/api/whatsapp/debug', (_req, res) => {
             readStateSize: Object.keys(crmState.whatsappReadState || {}).length,
             contactIdSequence: crmState.whatsappContactIdSequence
         },
+        aiAgent: {
+            enabled: aiAgentEnabled,
+            provider: aiAgentProvider,
+            model: aiAgentModel,
+            onlyFirstTimeClients: aiAgentOnlyFirstTimeClients,
+            stateCount: aiStateByWaId.size
+        },
         contacts: contactsByWaId.size,
         messageThreads: messagesByWaId.size,
         recentWebhookEvents: webhookEvents.slice(0, 20),
@@ -1145,6 +1547,7 @@ app.get('/api/whatsapp/contacts', async (_req, res) => {
             waId: contact.waId,
             profileName: contact.profileName,
             updatedAt: contact.updatedAt,
+            aiState: aiStateByWaId.get(contact.waId) || null,
             messages: (messagesByWaId.get(contact.waId) || []).map((message) => {
                 const knownStatus = messageStatusById.get(message.id || '');
                 if (!knownStatus) return message;
@@ -1172,6 +1575,22 @@ app.get('/api/crm/state', async (_req, res) => {
         whatsappReadState: crmState.whatsappReadState,
         whatsappContactIdSequence: crmState.whatsappContactIdSequence,
         updatedAt: crmState.updatedAt
+    });
+});
+
+app.get('/api/ai-agent/debug', (_req, res) => {
+    const rows = Array.from(aiStateByWaId.values())
+        .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+        .slice(0, 100);
+    res.json({
+        ok: true,
+        enabled: aiAgentEnabled,
+        provider: aiAgentProvider,
+        model: aiAgentModel,
+        onlyFirstTimeClients: aiAgentOnlyFirstTimeClients,
+        humanQueueName: aiAgentHumanQueueName,
+        configured: Boolean(aiAgentApiKey),
+        rows
     });
 });
 
@@ -1203,65 +1622,14 @@ app.post('/api/whatsapp/send', async (req, res) => {
     }
 
     try {
-        ensureWhatsappConfig();
-        pushApiEvent({
-            at: new Date().toISOString(),
-            route: 'send',
+        const result = await sendWhatsappTextMessage({
             waId,
-            type: 'text',
             text,
-            contextMessageId
+            contextMessageId,
+            senderType: 'human',
+            route: 'send'
         });
-        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
-            messaging_product: 'whatsapp',
-            to: waId,
-            type: 'text',
-            text: { body: text },
-            ...(contextMessageId ? { context: { message_id: contextMessageId } } : {})
-        });
-
-        const profileName = contactsByWaId.get(waId)?.profileName || waId;
-        const timestamp = new Date().toISOString();
-        const messageId = result?.messages?.[0]?.id || '';
-        const replyTo = makeReplyReference(waId, contextMessageId);
-        const contact = upsertContact(waId, profileName);
-        const storedMessage = {
-            id: messageId,
-            direction: 'outgoing',
-            text,
-            timestamp,
-            replyTo,
-            status: 'sent',
-            statusTimestamp: timestamp
-        };
-        addMessage(waId, storedMessage);
-        await persistContactSnapshot(contact);
-        await persistMessageSnapshot(waId, storedMessage);
-        pushApiEvent({
-            at: timestamp,
-            route: 'send',
-            waId,
-            type: 'text',
-            ok: true,
-            messageId
-        });
-
-        broadcast({
-            type: 'whatsapp_message',
-            payload: {
-                waId,
-                profileName,
-                id: messageId,
-                direction: 'outgoing',
-                text,
-                timestamp,
-                replyTo,
-                status: 'sent',
-                statusTimestamp: timestamp
-            }
-        });
-
-        return res.json({ ok: true, id: messageId });
+        return res.json({ ok: true, id: result.id });
     } catch (error) {
         pushApiEvent({
             at: new Date().toISOString(),
