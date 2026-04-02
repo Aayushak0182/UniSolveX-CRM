@@ -2252,6 +2252,7 @@ lucide.createIcons();
         document.getElementById('createTaskModalBtn').onclick = function() {
             const clientText = (taskClientInput?.value || '').trim();
             const serviceType = document.getElementById('taskServiceType').value;
+            const title = serviceType;
             if (!clientText || /^select a contact first$/i.test(clientText)) {
                 alert('Select a WhatsApp contact first, then create the task card.');
                 return;
