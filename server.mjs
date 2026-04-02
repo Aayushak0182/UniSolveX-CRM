@@ -42,6 +42,7 @@ const crmState = {
     orderListHtml: '',
     manualContacts: [],
     whatsappContactIdMap: {},
+    whatsappReadState: {},
     whatsappContactIdSequence: 100100,
     updatedAt: ''
 };
@@ -317,11 +318,19 @@ function normalizeCrmStatePayload(payload = {}) {
                 .filter(([key, value]) => key && value)
         )
         : crmState.whatsappContactIdMap;
+    const nextReadState = payload.whatsappReadState && typeof payload.whatsappReadState === 'object'
+        ? Object.fromEntries(
+            Object.entries(payload.whatsappReadState)
+                .map(([key, value]) => [normalizeWaId(key), String(value || '').trim()])
+                .filter(([key, value]) => key && value)
+        )
+        : crmState.whatsappReadState;
     const nextSequence = Number(payload.whatsappContactIdSequence);
     return {
         orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
         manualContacts: nextManualContacts,
         whatsappContactIdMap: nextContactIdMap,
+        whatsappReadState: nextReadState,
         whatsappContactIdSequence: Number.isFinite(nextSequence) && nextSequence > 0
             ? nextSequence
             : crmState.whatsappContactIdSequence,
@@ -342,6 +351,7 @@ async function loadPersistedCrmState() {
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
+    crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
     crmState.updatedAt = String(data.updatedAt || nextState.updatedAt);
     crmStateLoaded = true;
@@ -367,6 +377,7 @@ async function persistCrmState(partialPayload = {}) {
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
+    crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
     crmState.updatedAt = nextState.updatedAt;
     if (!initFirebasePersistence()) {
@@ -1093,6 +1104,7 @@ app.get('/api/whatsapp/debug', (_req, res) => {
             manualContacts: crmState.manualContacts.length,
             hasOrderListHtml: Boolean(crmState.orderListHtml),
             contactIdMapSize: Object.keys(crmState.whatsappContactIdMap || {}).length,
+            readStateSize: Object.keys(crmState.whatsappReadState || {}).length,
             contactIdSequence: crmState.whatsappContactIdSequence
         },
         contacts: contactsByWaId.size,
@@ -1157,6 +1169,7 @@ app.get('/api/crm/state', async (_req, res) => {
         orderListHtml: crmState.orderListHtml,
         manualContacts: crmState.manualContacts,
         whatsappContactIdMap: crmState.whatsappContactIdMap,
+        whatsappReadState: crmState.whatsappReadState,
         whatsappContactIdSequence: crmState.whatsappContactIdSequence,
         updatedAt: crmState.updatedAt
     });
@@ -1170,6 +1183,7 @@ app.post('/api/crm/state', async (req, res) => {
             orderListHtml: crmState.orderListHtml,
             manualContacts: crmState.manualContacts,
             whatsappContactIdMap: crmState.whatsappContactIdMap,
+            whatsappReadState: crmState.whatsappReadState,
             whatsappContactIdSequence: crmState.whatsappContactIdSequence,
             updatedAt: crmState.updatedAt
         });

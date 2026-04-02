@@ -73,6 +73,7 @@ lucide.createIcons();
         const MANUAL_CONTACTS_STORAGE_KEY = 'unisolvex_manual_contacts_v1';
         const WHATSAPP_CONTACT_ID_MAP_KEY = 'unisolvex_whatsapp_contact_id_map_v1';
         const WHATSAPP_CONTACT_ID_SEQUENCE_KEY = 'unisolvex_whatsapp_contact_id_seq_v1';
+        const WHATSAPP_READ_STATE_STORAGE_KEY = 'unisolvex_whatsapp_read_state_v1';
         const WHATSAPP_API_BASE_STORAGE_KEY = 'whatsappApiBase';
         const WHATSAPP_LAST_WORKING_API_BASE_KEY = 'unisolvex_last_working_whatsapp_api_base_v1';
         const CONTACT_PANEL_WIDE_STORAGE_KEY = 'unisolvex_contact_panel_wide_v1';
@@ -113,6 +114,8 @@ lucide.createIcons();
         let activeClientDetailsWaId = '';
         let clientDetailsEditMode = false;
         let crmStateSaveTimer = null;
+        let crmStateHydrationComplete = false;
+        let crmStatePendingSave = false;
 
         function applyTheme(theme) {
             const nextTheme = theme === 'dark' ? 'dark' : 'light';
@@ -339,6 +342,7 @@ lucide.createIcons();
                 orderListHtml: localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '',
                 manualContacts: readManualContactsFromStorage(),
                 whatsappContactIdMap: readWhatsappContactIdMapFromStorage(),
+                whatsappReadState: readWhatsappReadStateFromStorage(),
                 whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100
             };
         }
@@ -362,6 +366,10 @@ lucide.createIcons();
         }
 
         function scheduleCrmStateSave() {
+            if (!crmStateHydrationComplete) {
+                crmStatePendingSave = true;
+                return;
+            }
             if (crmStateSaveTimer) {
                 clearTimeout(crmStateSaveTimer);
             }
@@ -413,6 +421,10 @@ lucide.createIcons();
                 localStorage.setItem(
                     WHATSAPP_CONTACT_ID_MAP_KEY,
                     JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
+                );
+                localStorage.setItem(
+                    WHATSAPP_READ_STATE_STORAGE_KEY,
+                    JSON.stringify(state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {})
                 );
                 setWhatsappContactIdSequenceInStorage(
                     Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
@@ -841,6 +853,62 @@ lucide.createIcons();
             } catch {
                 return {};
             }
+        }
+
+        function readWhatsappReadStateFromStorage() {
+            try {
+                const raw = localStorage.getItem(WHATSAPP_READ_STATE_STORAGE_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch {
+                return {};
+            }
+        }
+
+        function writeWhatsappReadStateToStorage(map, skipRemote) {
+            localStorage.setItem(WHATSAPP_READ_STATE_STORAGE_KEY, JSON.stringify(map || {}));
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
+        function getLatestIncomingMessageTimestamp(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            const thread = whatsappMessagesByContact[normalizedWaId] || [];
+            for (let i = thread.length - 1; i >= 0; i -= 1) {
+                if (String(thread[i]?.direction || '') !== 'incoming') continue;
+                return String(thread[i]?.timestamp || '');
+            }
+            return '';
+        }
+
+        function markWhatsappThreadRead(waId, skipRemote) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+            const latestIncomingTimestamp = getLatestIncomingMessageTimestamp(normalizedWaId);
+            const readState = readWhatsappReadStateFromStorage();
+            if (latestIncomingTimestamp) {
+                readState[normalizedWaId] = latestIncomingTimestamp;
+            } else {
+                delete readState[normalizedWaId];
+            }
+            writeWhatsappReadStateToStorage(readState, skipRemote);
+            const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            if (item) {
+                setContactUnreadCount(item, 0);
+            }
+        }
+
+        function getUnreadCountForThread(waId, thread) {
+            const normalizedWaId = normalizeWaId(waId);
+            const readState = readWhatsappReadStateFromStorage();
+            const lastReadTime = new Date(readState[normalizedWaId] || 0).getTime() || 0;
+            return (Array.isArray(thread) ? thread : []).reduce((sum, message) => {
+                if (String(message?.direction || '') !== 'incoming') return sum;
+                const messageTime = new Date(message?.timestamp || 0).getTime() || 0;
+                return messageTime > lastReadTime ? sum + 1 : sum;
+            }, 0);
         }
 
         function writeWhatsappContactIdMapToStorage(map, skipRemote) {
@@ -1492,9 +1560,7 @@ lucide.createIcons();
                 item.classList.remove('is-menu-open');
                 item.querySelector('.contact-card-menu')?.classList.add('hidden');
                 setActiveContactItem(item);
-                item.dataset.unread = 'false';
-                item.dataset.unreadCount = '0';
-                updateContactStateUI(item);
+                markWhatsappThreadRead(waId);
                 updateTaskClientInputFromContact(item);
                 applyContactFilter();
                 if (chatHeaderTitle) chatHeaderTitle.textContent = name;
@@ -1958,9 +2024,12 @@ lucide.createIcons();
             if (latestActivityMs > 0) {
                 existing.dataset.lastActivity = String(latestActivityMs);
             }
-            if (markUnread) {
-                setContactUnreadCount(existing, Number(existing.dataset.unreadCount || 0) + 1);
+            if (activeWhatsappWaId && activeWhatsappWaId === normalizedWaId) {
+                markWhatsappThreadRead(normalizedWaId);
+            } else if (markUnread) {
+                setContactUnreadCount(existing, getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []));
             } else {
+                setContactUnreadCount(existing, getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []));
                 updateContactStateUI(existing);
             }
             return existing;
@@ -2004,6 +2073,11 @@ lucide.createIcons();
             const contactItem = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
             if (contactItem) {
                 contactItem.dataset.lastActivity = String(new Date(payload.timestamp || Date.now()).getTime() || Date.now());
+                if (activeWhatsappWaId === waId) {
+                    markWhatsappThreadRead(waId);
+                } else {
+                    setContactUnreadCount(contactItem, getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []));
+                }
                 updateContactStateUI(contactItem);
                 scheduleContactOrderRefresh();
             }
@@ -2086,6 +2160,11 @@ lucide.createIcons();
                         profileName: entry.profileName || waId,
                         updatedAt: entry.updatedAt || ''
                     }, false);
+                    const item = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
+                    if (item) {
+                        const nextUnreadCount = activeWhatsappWaId === waId ? 0 : getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []);
+                        setContactUnreadCount(item, nextUnreadCount);
+                    }
                 });
                 scheduleContactOrderRefresh();
                 if (activeWhatsappWaId) {
@@ -2211,7 +2290,11 @@ lucide.createIcons();
         scheduleContactOrderRefresh();
         initWhatsappSync();
         void hydrateCrmStateFromBackend().then((loaded) => {
+            crmStateHydrationComplete = true;
             if (!loaded) {
+                scheduleCrmStateSave();
+            } else if (crmStatePendingSave) {
+                crmStatePendingSave = false;
                 scheduleCrmStateSave();
             }
         });
