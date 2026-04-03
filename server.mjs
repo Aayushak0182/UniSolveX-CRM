@@ -19,6 +19,10 @@ const firebaseServiceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || 
 const firebaseServiceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '';
 const firebaseStorageBucketName = process.env.FIREBASE_STORAGE_BUCKET || '';
 const whatsappMediaStoragePrefix = process.env.WHATSAPP_MEDIA_STORAGE_PREFIX || 'whatsapp-media';
+const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
+const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
+const cloudinaryFolder = String(process.env.CLOUDINARY_FOLDER || 'unisolvex-crm').trim() || 'unisolvex-crm';
 const aiAgentEnabled = /^(1|true|yes|on)$/i.test(process.env.AI_AGENT_ENABLED || '');
 const aiAgentProvider = String(process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
 const aiAgentModel = String(process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
@@ -176,6 +180,49 @@ function parseDataUrl(dataUrl) {
     };
 }
 
+function isCloudinaryConfigured() {
+    return Boolean(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
+}
+
+function buildCloudinarySignature(params) {
+    const toSign = Object.entries(params)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&');
+    return crypto.createHash('sha1').update(`${toSign}${cloudinaryApiSecret}`).digest('hex');
+}
+
+async function uploadMediaBufferToCloudinary({ waId, messageId, timestamp, fileName, mimeType, buffer }) {
+    if (!isCloudinaryConfigured() || !buffer?.length) return '';
+    const safeWaId = normalizeWaId(waId) || 'unknown';
+    const safeName = sanitizeFileSegment(fileName || `media_${messageId || Date.now()}.${inferFileExtension(mimeType, fileName)}`);
+    const ts = String(timestamp || new Date().toISOString()).replace(/[:.]/g, '-');
+    const publicId = `${cloudinaryFolder}/${safeWaId}/${ts}_${safeName}`;
+    const uploadTimestamp = Math.floor(Date.now() / 1000);
+    const signature = buildCloudinarySignature({
+        public_id: publicId,
+        timestamp: uploadTimestamp
+    });
+    const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${buffer.toString('base64')}`;
+    const form = new FormData();
+    form.append('file', dataUrl);
+    form.append('api_key', cloudinaryApiKey);
+    form.append('timestamp', String(uploadTimestamp));
+    form.append('public_id', publicId);
+    form.append('signature', signature);
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/auto/upload`, {
+        method: 'POST',
+        body: form
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.secure_url) {
+        throw new Error(payload?.error?.message || 'Cloudinary upload failed');
+    }
+    return String(payload.secure_url || '');
+}
+
 async function uploadMediaBufferToFirebaseStorage({ waId, messageId, timestamp, fileName, mimeType, buffer }) {
     if (!initFirebasePersistence() || !firebaseBucket || !buffer?.length) return '';
     const safeWaId = normalizeWaId(waId) || 'unknown';
@@ -195,6 +242,13 @@ async function uploadMediaBufferToFirebaseStorage({ waId, messageId, timestamp, 
         expires: '2035-01-01'
     });
     return signedUrl;
+}
+
+async function uploadMediaBufferToStorage(args) {
+    if (isCloudinaryConfigured()) {
+        return await uploadMediaBufferToCloudinary(args);
+    }
+    return await uploadMediaBufferToFirebaseStorage(args);
 }
 
 async function fetchWhatsappMediaBuffer(mediaId) {
@@ -230,7 +284,7 @@ async function backupIncomingMediaToStorage({ waId, messageId, timestamp, attach
         const fileName = attachmentName && attachmentName !== 'Image' && attachmentName !== 'Video' && attachmentName !== 'Audio' && attachmentName !== 'Document'
             ? attachmentName
             : `media_${mediaId}.${inferFileExtension(mimeType || resolvedMimeType, attachmentName)}`;
-        return await uploadMediaBufferToFirebaseStorage({
+        return await uploadMediaBufferToStorage({
             waId,
             messageId,
             timestamp,
@@ -864,7 +918,7 @@ function updateMessageStatus(waId, messageId, status, statusTimestamp) {
     return updated;
 }
 
-async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', senderType = 'human', route = 'send' }) {
+async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', senderType = 'human', route = 'send', messageType = 'text' }) {
     const normalizedWaId = normalizeWaId(waId);
     const bodyText = String(text || '').trim();
     const replyContextId = String(contextMessageId || '').trim();
@@ -900,6 +954,7 @@ async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', send
         senderType,
         text: bodyText,
         timestamp,
+        messageType,
         replyTo,
         status: 'sent',
         statusTimestamp: timestamp
@@ -926,6 +981,7 @@ async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', send
             senderType,
             text: bodyText,
             timestamp,
+            messageType,
             replyTo,
             status: 'sent',
             statusTimestamp: timestamp
@@ -981,9 +1037,9 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 await sendWhatsappTextMessage({
                     waId: normalizedWaId,
                     text: aiAgentHandoffMessage,
-                    contextMessageId: messageId,
                     senderType: 'ai',
-                    route: 'ai-handoff'
+                    route: 'ai-handoff',
+                    messageType: 'handoff'
                 });
                 return;
             }
@@ -999,9 +1055,9 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 await sendWhatsappTextMessage({
                     waId: normalizedWaId,
                     text: aiAgentHandoffMessage,
-                    contextMessageId: messageId,
                     senderType: 'ai',
-                    route: 'ai-handoff'
+                    route: 'ai-handoff',
+                    messageType: 'handoff'
                 });
                 return;
             }
@@ -1025,9 +1081,9 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 await sendWhatsappTextMessage({
                     waId: normalizedWaId,
                     text: aiAgentHandoffMessage,
-                    contextMessageId: messageId,
                     senderType: 'ai',
-                    route: 'ai-handoff'
+                    route: 'ai-handoff',
+                    messageType: 'handoff'
                 });
                 return;
             }
@@ -1043,7 +1099,6 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
             await sendWhatsappTextMessage({
                 waId: normalizedWaId,
                 text: decision.replyText,
-                contextMessageId: messageId,
                 senderType: 'ai',
                 route: 'ai-reply'
             });
@@ -1377,7 +1432,25 @@ app.post('/webhook', (req, res) => {
                     }).then((attachmentUrl) => {
                         if (!attachmentUrl) return;
                         storedMessage.attachmentUrl = attachmentUrl;
-                        return persistMessageSnapshot(waId, storedMessage);
+                        return persistMessageSnapshot(waId, storedMessage).then(() => {
+                            broadcast({
+                                type: 'whatsapp_message',
+                                payload: {
+                                    waId,
+                                    profileName,
+                                    id: storedMessage.id || '',
+                                    direction: storedMessage.direction || 'incoming',
+                                    text: storedMessage.text || '',
+                                    timestamp: storedMessage.timestamp || timestamp,
+                                    messageType: storedMessage.messageType || 'text',
+                                    attachmentName: storedMessage.attachmentName || '',
+                                    attachmentUrl: storedMessage.attachmentUrl || '',
+                                    mediaId: storedMessage.mediaId || '',
+                                    mimeType: storedMessage.mimeType || '',
+                                    replyTo: storedMessage.replyTo || null
+                                }
+                            });
+                        });
                     }).catch((error) => {
                         console.warn('[storage] Failed to persist incoming media backup:', error?.message || error);
                     });
@@ -1628,6 +1701,30 @@ app.post('/api/ai-agent/test', async (req, res) => {
     }
 });
 
+app.post('/api/ai-agent/contact-mode', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const mode = String(req.body?.mode || '').trim().toLowerCase();
+    if (!waId || !['ai', 'human'].includes(mode)) {
+        return res.status(400).json({ ok: false, error: 'waId and mode (ai|human) are required' });
+    }
+    try {
+        const existing = await ensureAiContactState(waId, contactsByWaId.get(waId)?.profileName || waId);
+        const nextState = await persistAiContactState({
+            ...existing,
+            waId,
+            aiEnabled: mode === 'ai',
+            handoffToHuman: mode === 'human',
+            handoffReason: mode === 'human' ? 'manual_human_transfer' : '',
+            humanAssignedTo: mode === 'human' ? aiAgentHumanQueueName : '',
+            existingClientSkipped: false,
+            updatedAt: new Date().toISOString()
+        });
+        return res.json({ ok: true, mode, state: nextState });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to update AI contact mode' });
+    }
+});
+
 app.post('/api/crm/state', async (req, res) => {
     try {
         await persistCrmState(req.body || {});
@@ -1728,7 +1825,7 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
         let attachmentUrl = '';
         try {
             const parsed = parseDataUrl(dataUrl);
-            attachmentUrl = await uploadMediaBufferToFirebaseStorage({
+            attachmentUrl = await uploadMediaBufferToStorage({
                 waId,
                 messageId,
                 timestamp,
@@ -2047,7 +2144,9 @@ try {
         await ensurePersistedStateLoaded(true);
         await ensureCrmStateLoaded(true);
         console.log('[storage] Firebase persistence enabled.');
-        if (firebaseBucket) {
+        if (isCloudinaryConfigured()) {
+            console.log('[storage] Media backup provider: Cloudinary');
+        } else if (firebaseBucket) {
             console.log('[storage] Media backup bucket:', firebaseBucket.name);
         }
     } else if (firebasePersistenceInitError) {

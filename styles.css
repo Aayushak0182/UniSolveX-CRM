@@ -513,14 +513,38 @@ html[data-theme="dark"] .chat-empty-state {
 }
 .chat-reply-quote {
   margin-bottom: 0.4rem;
+  width: 100%;
   padding-left: 0.55rem;
   border-left: 3px solid var(--reply-accent);
   font-size: 0.72rem;
   color: var(--text-secondary);
+  background: transparent;
+  text-align: left;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  cursor: pointer;
 }
 .chat-reply-quote strong {
   display: block;
   color: var(--text-primary);
+}
+.chat-message-row.is-reply-target {
+  animation: chat-reply-highlight 1.8s ease;
+}
+.chat-message-row.is-reply-target .chat-bubble-client,
+.chat-message-row.is-reply-target .chat-bubble-admin,
+.chat-message-row.is-reply-target .chat-bubble-template {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35), var(--shadow-bubble);
+}
+#aiAssistBtn.is-active {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+}
+@keyframes chat-reply-highlight {
+  0% { transform: scale(1); }
+  20% { transform: scale(1.01); }
+  100% { transform: scale(1); }
 }
 .chat-attachment-chip {
   display: inline-flex;
@@ -1123,6 +1147,15 @@ html[data-theme="dark"] .chat-empty-state {
   color: var(--text-soft) !important;
 }
 
+.chat-composer-bar {
+  gap: 0.5rem;
+}
+
+.chat-composer-actions {
+  flex-shrink: 0;
+  gap: 0.05rem;
+}
+
 .contact-item select,
 .contact-item button,
 #contactSearch,
@@ -1153,6 +1186,10 @@ html[data-theme="dark"] .chat-empty-state {
 #contactSearch::placeholder,
 #orderSearch::placeholder {
   color: var(--text-soft);
+}
+
+#chatInput {
+  min-width: 0;
 }
 
 #sendBtn.is-disabled,

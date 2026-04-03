@@ -7,17 +7,20 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
+    <link rel="shortcut icon" href="/favicon.ico?v=2">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
 
     <!-- Navigation Bar -->
     <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
-        <div class="flex items-center gap-2">
-            <div class="bg-indigo-600 text-white p-1.5 rounded-lg">
-                <i data-lucide="graduation-cap"></i>
+        <div class="brand-lockup flex items-center gap-3">
+            <div class="brand-mark">
+                <span class="brand-mark-glow"></span>
+                <img src="/favicon.ico?v=2" alt="UniSolveX" class="brand-mark-icon">
             </div>
-            <span class="font-bold text-xl text-gray-800">UniSolveX <span class="text-indigo-600">CRM</span></span>
+            <span class="brand-wordmark font-bold text-xl text-gray-800">UniSolveX <span class="brand-wordmark-accent text-indigo-600">CRM</span></span>
         </div>
         <div class="flex items-center gap-3 border-l pl-4">
             <div class="text-right leading-tight">
@@ -48,18 +51,24 @@
                     <button id="toggleContactPanelWidth" class="contact-panel-toggle p-2 border rounded-md text-gray-600 bg-white hover:bg-gray-50" title="Expand / Collapse contacts panel" aria-pressed="false" type="button">
                         <i data-lucide="chevrons-right" class="w-4 h-4"></i>
                     </button>
-                    <select id="contactFilter" class="contact-filter px-2 py-2 border rounded-md text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                        <option value="">Filter</option>
-                        <option value="new">New Client</option>
-                        <option value="old">Old Client</option>
-                        <option value="tutor">Tutor</option>
-                        <option value="friend">Client's Friend</option>
-                        <option value="useless">Useless/Broker</option>
-                        <option value="archived">Archive / Block</option>
-                    </select>
+                    <button id="toggleArchivedViewBtn" class="archive-toggle-btn p-2 border rounded-md text-gray-600 bg-white hover:bg-gray-50" title="Show archived chats" aria-pressed="false" type="button">
+                        <i data-lucide="archive" class="w-4 h-4"></i>
+                        <span id="archivedUnreadBadge" class="archive-toggle-badge hidden">0</span>
+                    </button>
                     <button id="addContactBtn" class="add-contact-btn px-2.5 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 whitespace-nowrap">
                         Add Contact
                     </button>
+                    <div class="contact-filter-wrap">
+                        <i data-lucide="list-filter" class="contact-filter-icon w-4 h-4"></i>
+                        <select id="contactFilter" class="contact-filter px-2 py-2 border rounded-md text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            <option value="">Filter</option>
+                            <option value="new">New Client</option>
+                            <option value="old">Old Client</option>
+                            <option value="tutor">Tutor</option>
+                            <option value="friend">Client's Friend</option>
+                            <option value="useless">Useless/Broker</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             <div id="contactList" class="flex-1 overflow-y-auto custom-scrollbar">
@@ -67,21 +76,28 @@
         </aside>
 
         <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
-            <div class="chat-header p-4 border-b flex justify-between items-center bg-gray-50">
-                <div>
-                    <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Select a contact</h2>
-                    <p id="chatHeaderStatus" class="text-xs text-gray-500 flex items-center gap-1">
-                        <span class="w-2 h-2 bg-gray-300 rounded-full"></span> No active chat
-                    </p>
-                    <p id="chatWindowTimer" class="mt-1 text-[11px] font-mono font-medium text-amber-700">--:--:--</p>
+            <div id="chatHeader" class="chat-header p-3 border-b bg-gray-50">
+                <div class="chat-header-bar">
+                    <div class="chat-header-profile">
+                        <div id="chatHeaderAvatar" class="chat-header-avatar">?</div>
+                        <div class="chat-header-text">
+                            <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Select a contact</h2>
+                            <p id="chatHeaderStatus" class="hidden text-xs text-gray-500"></p>
+                        </div>
+                    </div>
+                    <div class="chat-header-timer-wrap">
+                        <p id="chatWindowTimer" class="text-[11px] font-mono font-medium text-red-600">EXPIRED</p>
+                    </div>
+                    <div class="chat-header-actions">
+                        <button id="createTaskBtn" class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-md">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i> Create Task Card
+                        </button>
+                    </div>
                 </div>
-                <button id="createTaskBtn" class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-md">
-                    <i data-lucide="plus-circle" class="w-4 h-4"></i> Create Task Card
-                </button>
             </div>
 
-            <div id="chatMessages" class="chat-wallpaper flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
-                <p class="text-sm text-gray-500">No WhatsApp messages yet.</p>
+            <div id="chatMessages" class="chat-wallpaper is-empty-chat flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
+                <div class="chat-empty-state" aria-hidden="true"></div>
             </div>
 
             <div class="chat-composer-shell p-4 border-t bg-white">
@@ -104,15 +120,20 @@
                     </div>
                 </div>
                 <div id="chatComposerAttachments" class="mb-3 hidden flex flex-wrap gap-2"></div>
-                <div class="chat-composer-bar flex items-center gap-3 bg-gray-50 p-2 rounded-xl border">
-                    <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
-                        <i data-lucide="paperclip" class="w-5 h-5"></i>
-                    </button>
+                <div class="chat-composer-bar flex items-center bg-gray-50 p-2 rounded-xl border">
                     <input id="chatFileInput" type="file" class="hidden" multiple>
                     <input id="chatInput" type="text" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2">
-                    <button id="notifyBtn" class="p-2 text-orange-500 hover:bg-orange-50 rounded-full" title="Send chat initiation template">
-                        <i data-lucide="message-circle-plus" class="w-5 h-5"></i>
-                    </button>
+                    <div class="chat-composer-actions flex items-center">
+                        <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
+                            <i data-lucide="paperclip" class="w-5 h-5"></i>
+                        </button>
+                        <button id="aiAssistBtn" class="p-2 text-sky-600 hover:bg-sky-50 rounded-full" title="Transfer this chat to AI">
+                            <i data-lucide="bot" class="w-5 h-5"></i>
+                        </button>
+                        <button id="notifyBtn" class="p-2 text-orange-500 hover:bg-orange-50 rounded-full" title="Send chat initiation template">
+                            <i data-lucide="message-circle-plus" class="w-5 h-5"></i>
+                        </button>
+                    </div>
                     <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700">
                         <span class="text-sm font-bold">Send</span>
                         <i data-lucide="send" class="w-4 h-4"></i>
@@ -122,22 +143,29 @@
         </main>
 
         <aside class="order-panel bg-gray-50 border-l flex flex-col">
-             <div class="p-4 border-b bg-white space-y-2">
-                 <h3 class="font-bold text-gray-700 flex items-center gap-2">
-                     <i data-lucide="shopping-bag" class="w-4 h-4"></i> Order Details
-                 </h3>
-                 <div class="relative">
-                     <i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i>
-                     <input id="orderSearch" type="text" placeholder="Search by Client ID / Order ID" class="w-full pl-8 pr-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+             <div class="order-panel-top p-4 border-b bg-white space-y-3">
+                 <div class="order-tabs" role="tablist" aria-label="Order views">
+                     <button id="orderTabMine" class="order-tab-btn is-active" type="button" data-order-tab="mine">Orders</button>
+                     <button id="orderTabExpert" class="order-tab-btn" type="button" data-order-tab="expert">Expert List</button>
+                     <button id="orderTabAll" class="order-tab-btn" type="button" data-order-tab="all">All Orders</button>
                  </div>
-                 <select id="orderDeliveryWindow" class="w-full px-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                     <option value="">Delivery: All</option>
-                     <option value="24h">Next 24 hours</option>
-                     <option value="2d">Next 2 days</option>
-                     <option value="7d">Next 7 days</option>
-                     <option value="past24h">Past 24 hours</option>
-                     <option value="past7d">Past 7 days</option>
-                 </select>
+                 <div class="order-search-row">
+                     <div class="relative flex-1">
+                         <i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i>
+                         <input id="orderSearch" type="text" placeholder="Search for orders..." class="w-full pl-8 pr-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                     </div>
+                     <div class="order-filter-wrap">
+                         <i data-lucide="funnel-plus" class="order-filter-icon w-4 h-4"></i>
+                         <select id="orderDeliveryWindow" class="order-filter-select px-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500" aria-label="Order delivery filter" title="Filter orders">
+                             <option value="">Delivery: All</option>
+                             <option value="24h">Next 24 hours</option>
+                             <option value="2d">Next 2 days</option>
+                             <option value="7d">Next 7 days</option>
+                             <option value="past24h">Past 24 hours</option>
+                             <option value="past7d">Past 7 days</option>
+                         </select>
+                     </div>
+                 </div>
              </div>
             <div id="orderList" class="p-3 overflow-y-auto custom-scrollbar space-y-2"></div>
         </aside>
@@ -145,7 +173,7 @@
 
     <div id="taskModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-xl shadow-2xl w-96 p-6">
-            <h3 class="text-lg font-bold mb-4">Create Task (Device 5)</h3>
+            <h3 id="taskModalTitle" class="text-lg font-bold mb-4">Create Task</h3>
             <div class="space-y-4">
                 <div>
                     <label class="text-xs font-bold text-gray-500 uppercase">Client</label>
@@ -179,6 +207,45 @@
         </div>
     </div>
 
+    <div id="clientDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[560px] max-w-[94vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Client Details</h3>
+                    <p class="text-xs text-gray-500">Review and update client profile information.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="editClientDetailsBtn" type="button" class="rounded-lg border px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50">Edit</button>
+                    <button id="closeClientDetailsBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Name</label>
+                    <input id="clientDetailsName" type="text" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">University Name</label>
+                    <input id="clientDetailsUniversity" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="University or college name">
+                </div>
+                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                        <label class="text-xs font-bold uppercase text-gray-500">Semester</label>
+                        <input id="clientDetailsSemester" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="Semester / year">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold uppercase text-gray-500">Client Timezone</label>
+                        <input id="clientDetailsTimezone" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="e.g. Asia/Kolkata">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button id="cancelClientDetailsBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button id="saveClientDetailsBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="orderDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-xl shadow-2xl w-[1050px] max-w-[96vw] h-[88vh] overflow-y-auto p-6">
             <div class="sticky top-0 z-20 bg-white border-b pb-2 mb-3 flex justify-between items-center">
@@ -188,8 +255,8 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 <div class="md:col-span-2 space-y-3">
                     <div>
-                        <label class="text-xs font-bold text-gray-500 uppercase">Title</label>
-                        <input id="odTitle" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Work Details</label>
+                        <textarea id="odTitle" rows="3" class="w-full mt-1 p-2 border rounded-md resize-y min-h-[96px]"></textarea>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
@@ -340,4 +407,3 @@
     <script src="app.js"></script>
 </body>
 </html>
-
