@@ -1594,6 +1594,40 @@ app.get('/api/ai-agent/debug', (_req, res) => {
     });
 });
 
+app.post('/api/ai-agent/test', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '999000000001');
+    const profileName = String(req.body?.profileName || 'Test Client').trim() || 'Test Client';
+    const text = String(req.body?.text || '').trim();
+
+    if (!text) {
+        return res.status(400).json({ ok: false, error: 'text is required' });
+    }
+
+    try {
+        const aiState = await ensureAiContactState(waId, profileName);
+        const decision = await generateAiAgentDecision({
+            waId,
+            profileName,
+            latestMessageText: text,
+            aiState
+        });
+        return res.json({
+            ok: true,
+            waId,
+            profileName,
+            inputText: text,
+            pricingIntentDetected: isPricingIntent(text),
+            handoffMessage: aiAgentHandoffMessage,
+            decision
+        });
+    } catch (error) {
+        return res.status(500).json({
+            ok: false,
+            error: error?.message || 'AI agent test failed'
+        });
+    }
+});
+
 app.post('/api/crm/state', async (req, res) => {
     try {
         await persistCrmState(req.body || {});
