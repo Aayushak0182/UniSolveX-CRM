@@ -1958,14 +1958,68 @@ lucide.createIcons();
                     `
                     : '';
                 const bubbleBody = isMediaMessageType(messageType)
-                    ? `
-                        <div class="chat-bubble-file">
-                            <p class="font-semibold capitalize">${escapeHtml(messageType)}</p>
-                            ${attachmentName ? `<p>${attachmentName}</p>` : ''}
-                            ${attachmentUrl ? `<a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" class="text-xs font-medium text-indigo-700 underline">Open attachment</a>` : ''}
-                            ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
-                        </div>
-                    `
+                    ? (messageType === 'image' && attachmentUrl
+                        ? `
+                            <div class="chat-bubble-file chat-bubble-media">
+                                <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" class="chat-media-link" title="Open image">
+                                    <img src="${escapeHtml(attachmentUrl)}" alt="${attachmentName || 'Image'}" class="chat-media-preview chat-media-image">
+                                </a>
+                                <div class="chat-media-actions">
+                                    <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer">Open</a>
+                                    <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" download>Save</a>
+                                </div>
+                                ${attachmentName ? `<p class="chat-media-name">${attachmentName}</p>` : ''}
+                                ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
+                            </div>
+                        `
+                        : (messageType === 'video' && attachmentUrl)
+                            ? `
+                                <div class="chat-bubble-file chat-bubble-media">
+                                    <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" class="chat-media-link" title="Open video">
+                                        <video class="chat-media-preview chat-media-video" preload="metadata" muted playsinline>
+                                            <source src="${escapeHtml(attachmentUrl)}" type="${escapeHtml(msg.mimeType || 'video/mp4')}">
+                                        </video>
+                                    </a>
+                                    <div class="chat-media-actions">
+                                        <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer">Open</a>
+                                        <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" download>Save</a>
+                                    </div>
+                                    ${attachmentName ? `<p class="chat-media-name">${attachmentName}</p>` : ''}
+                                    ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
+                                </div>
+                            `
+                            : (messageType === 'audio' && attachmentUrl)
+                                ? `
+                                    <div class="chat-bubble-file chat-bubble-audio">
+                                        <p class="chat-media-name">${attachmentName || 'Audio message'}</p>
+                                        <audio controls preload="metadata" class="chat-audio-player">
+                                            <source src="${escapeHtml(attachmentUrl)}" type="${escapeHtml(msg.mimeType || 'audio/mpeg')}">
+                                        </audio>
+                                        <div class="chat-media-actions">
+                                            <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer">Open</a>
+                                            <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" download>Save</a>
+                                        </div>
+                                        ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
+                                    </div>
+                                `
+                                : `
+                                    <div class="chat-bubble-file chat-bubble-document">
+                                        <div class="chat-doc-card">
+                                            <div class="chat-doc-icon">${escapeHtml(String(messageType || 'file').slice(0, 3).toUpperCase())}</div>
+                                            <div class="chat-doc-copy">
+                                                <p class="chat-doc-type">${escapeHtml(messageType)}</p>
+                                                <p class="chat-doc-name">${attachmentName || 'Attachment'}</p>
+                                            </div>
+                                        </div>
+                                        ${attachmentUrl ? `
+                                            <div class="chat-media-actions">
+                                                <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer">Open</a>
+                                                <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" download>Save</a>
+                                            </div>
+                                        ` : ''}
+                                        ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
+                                    </div>
+                                `)
                     : (isTemplateMessage || isHandoffMessage)
                         ? `
                             <div class="chat-template-body">

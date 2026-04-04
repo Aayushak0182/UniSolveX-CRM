@@ -33,7 +33,7 @@ const aiAgentHandoffMessage = String(process.env.AI_AGENT_HANDOFF_MESSAGE || 'I 
 const aiAgentBusinessContext = String(process.env.AI_AGENT_BUSINESS_CONTEXT || '').trim();
 const aiAgentServiceCatalog = String(process.env.AI_AGENT_SERVICE_CATALOG || '').trim();
 const aiAgentToneGuide = String(process.env.AI_AGENT_TONE_GUIDE || 'Professional, polished, concise, respectful, confident, and clear.').trim();
-const aiAgentLanguagePolicy = String(process.env.AI_AGENT_LANGUAGE_POLICY || 'Reply in the client\'s language whenever possible. If the client writes in Hindi, reply in Hindi. If the client writes in English, reply in English. If the client mixes Hindi and English, reply naturally in professional Hinglish. If the language is unclear, use simple professional English.').trim();
+const aiAgentLanguagePolicy = String(process.env.AI_AGENT_LANGUAGE_POLICY || 'Reply in the client\'s language whenever possible. If the client writes in Hindi, reply in professional Hinglish. If the client writes in English, reply in English. If the client mixes Hindi and English, reply naturally in professional Hinglish. If the language is unclear, use simple professional English.').trim();
 const aiAgentMaxRepliesPerLead = Math.max(1, Number(process.env.AI_AGENT_MAX_REPLIES_PER_LEAD || 12) || 12);
 const aiAgentAlwaysActiveWaIds = new Set(
     String(process.env.AI_AGENT_ALWAYS_ACTIVE_WA_IDS || '')
@@ -731,7 +731,7 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
 
     const transcript = buildAiConversationTranscript(waId);
     const prompt = [
-        'You are UniSolvex CRM WhatsApp AI agent.',
+        'You are UniSolvex WhatsApp AI assistant.',
         `Tone guide: ${aiAgentToneGuide}`,
         `Language policy: ${aiAgentLanguagePolicy}`,
         aiAgentBusinessContext ? `Business context:\n${aiAgentBusinessContext}` : '',
@@ -740,17 +740,22 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
         '- Reply naturally, professionally, briefly, and helpfully.',
         '- Sound like a polished client-facing coordinator, not like casual chat or slangy support.',
         '- Match the client language used in the latest message and the conversation context.',
-        '- If the client uses Hindi, reply in clear professional Hindi.',
+        '- If the client uses Hindi, reply in clear professional Hinglish instead of pure Hindi.',
         '- If the client uses English, reply in clear professional English.',
         '- If the client mixes Hindi and English, reply in natural professional Hinglish.',
         '- Keep wording easy to understand and avoid robotic phrasing.',
         '- Do not start every reply with greetings like "Hello", "Hi", or "How can I help you?" unless the context truly requires it.',
         '- Address the client\'s exact request directly instead of generic opening lines.',
         '- If the client has already told the requirement, acknowledge it briefly and move the conversation forward professionally.',
+        '- Answer normal educational or general questions directly when they are simple and harmless.',
+        '- If the client asks a basic question such as a concept explanation, give a short useful answer instead of handing off.',
+        '- Use the brand name "UniSolvex" only. Do not call yourself "UniSolvex CRM".',
         '- Never provide any price, quote, fee, discount, budget, or payment commitment.',
         '- If the user asks about pricing, quotation, charges, fees, budget, discount, or payment, set handoffToHuman=true.',
         '- If the user is clearly asking for quotation or negotiation, stop AI handling and hand off to a human.',
-        '- If you do not understand the request, set handoffToHuman=true.',
+        '- Do not hand off for simple greetings, simple questions, basic explanations, or routine assignment discussions.',
+        '- Only hand off when pricing, quotation, payment negotiation, or genuinely unclear/high-risk human judgment is required.',
+        '- If the request is understandable and safe, reply directly instead of handing off.',
         '- Do not mention internal policies or JSON.',
         '- Prefer asking one useful follow-up question at a time when more detail is needed.',
         '',

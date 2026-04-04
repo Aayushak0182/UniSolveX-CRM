@@ -26,20 +26,22 @@
         <p id="loginError" class="text-red-500 text-sm mt-4 text-center hidden">Invalid username or password.</p>
     </div>
     <script>
-        const allowedAgents = {
-            Aayush: '220416',
-            Reya: '123456'
+        const allowedUsers = {
+            Aayush: { password: '220416', role: 'agent' },
+            Reya: { password: '123456', role: 'agent' },
+            admin: { password: '220416', role: 'admin' }
         };
 
         document.getElementById('loginForm').onsubmit = function(e) {
             e.preventDefault();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value.trim();
-            const isValidUser = Object.prototype.hasOwnProperty.call(allowedAgents, username);
-            const isValidPassword = isValidUser && allowedAgents[username] === password;
+            const user = Object.prototype.hasOwnProperty.call(allowedUsers, username) ? allowedUsers[username] : null;
+            const isValidPassword = Boolean(user) && user.password === password;
 
             if (isValidPassword) {
                 localStorage.setItem('agentName', username);
+                localStorage.setItem('agentRole', user.role);
                 window.location.href = 'index.html';
                 return;
             }
