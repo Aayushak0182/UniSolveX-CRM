@@ -66,6 +66,7 @@ lucide.createIcons();
         const notifyBtn = document.getElementById('notifyBtn');
         const sendBtn = document.getElementById('sendBtn');
         const attachFileBtn = document.getElementById('attachFileBtn');
+        const aiAssistBtn = document.getElementById('aiAssistBtn');
         let activeOrderCard = null;
         let activeWhatsappWaId = '';
         const orderSequenceByClient = {};
@@ -616,6 +617,19 @@ lucide.createIcons();
             const suffix = contactId ? ` (${contactId})` : '';
             taskClientInput.value = displayName + suffix;
             taskClientInput.placeholder = 'Selected contact';
+        }
+
+        function updateAiAssistButtonState(item) {
+            if (!aiAssistBtn) return;
+            const activeItem = item || (activeWhatsappWaId
+                ? contactList.querySelector('.contact-item[data-wa-id="' + normalizeWaId(activeWhatsappWaId) + '"]')
+                : null);
+            const mode = String(activeItem?.dataset?.aiMode || 'human');
+            aiAssistBtn.disabled = !activeItem;
+            aiAssistBtn.classList.toggle('is-active', Boolean(activeItem) && mode === 'ai');
+            aiAssistBtn.title = activeItem
+                ? (mode === 'ai' ? 'AI is active for this chat' : 'Transfer this chat to AI')
+                : 'Select a contact first';
         }
 
         function refreshContactOrder() {
@@ -1565,6 +1579,7 @@ lucide.createIcons();
                 applyContactFilter();
                 if (chatHeaderTitle) chatHeaderTitle.textContent = name;
                 if (chatHeaderAvatar) chatHeaderAvatar.textContent = (name.charAt(0) || '?').toUpperCase();
+                updateAiAssistButtonState(item);
                 updateChatHeaderVisibility(waId);
                 renderWhatsappMessages(waId);
                 updateChatWindowState(waId);
@@ -1817,6 +1832,46 @@ lucide.createIcons();
             return '<span class="chat-status chat-status-sent" title="Sent"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.25 3.6 7.35 8.25 1.75"></path></svg></span>';
         }
 
+        function positionOpenMessageMenus() {
+            if (!chatMessages) return;
+            const chatRect = chatMessages.getBoundingClientRect();
+            const viewportLeft = Math.max(0, chatRect.left);
+            const viewportRight = Math.min(window.innerWidth, chatRect.right);
+            const viewportTop = Math.max(0, chatRect.top);
+            const viewportBottom = Math.min(window.innerHeight, chatRect.bottom);
+
+            chatMessages.querySelectorAll('.chat-message-menu').forEach((menu) => {
+                const row = menu.closest('.chat-message-row');
+                const btn = row?.querySelector('.chat-message-menu-btn');
+                if (!row || !btn) return;
+
+                menu.style.left = '0px';
+                menu.style.top = '0px';
+
+                const rowRect = row.getBoundingClientRect();
+                const btnRect = btn.getBoundingClientRect();
+                const menuRect = menu.getBoundingClientRect();
+                const gap = 4;
+                const spaceRight = viewportRight - btnRect.right;
+                const spaceLeft = btnRect.left - viewportLeft;
+                const openToRight = spaceRight >= menuRect.width || spaceRight >= spaceLeft;
+                const left = openToRight
+                    ? (btnRect.right - rowRect.left + gap)
+                    : (btnRect.left - rowRect.left - menuRect.width - gap);
+                const spaceBelow = viewportBottom - btnRect.bottom;
+                const spaceAbove = btnRect.top - viewportTop;
+                const openBelow = spaceBelow >= menuRect.height || spaceBelow >= spaceAbove;
+                const top = openBelow
+                    ? (btnRect.bottom - rowRect.top + gap)
+                    : (btnRect.top - rowRect.top - menuRect.height - gap);
+
+                menu.style.left = `${left}px`;
+                menu.style.top = `${top}px`;
+                menu.dataset.horizontal = openToRight ? 'right' : 'left';
+                menu.dataset.vertical = openBelow ? 'down' : 'up';
+            });
+        }
+
         function renderWhatsappMessages(waId) {
             if (!chatMessages) return;
             if (!waId) {
@@ -1842,12 +1897,13 @@ lucide.createIcons();
                 const isTemplateMessage = String(messageType).toLowerCase() === 'template';
                 const attachmentName = escapeHtml(msg.attachmentName || '');
                 const attachmentUrl = String(msg.attachmentUrl || '').trim();
+                const isHandoffMessage = String(messageType).toLowerCase() === 'handoff';
                 const replyQuote = msg.replyTo?.id
                     ? `
-                        <div class="chat-reply-quote">
+                        <button type="button" class="chat-reply-quote" data-reply-target-id="${escapeHtml(msg.replyTo.id || '')}" data-reply-target-key="${escapeHtml(msg.replyTo.clientKey || '')}">
                             <strong>${escapeHtml(msg.replyTo.direction === 'incoming' ? 'Client' : 'You')}</strong>
                             <span>${escapeHtml(msg.replyTo.text || '(message)')}</span>
-                        </div>
+                        </button>
                     `
                     : '';
                 const bubbleBody = isMediaMessageType(messageType)
@@ -1859,24 +1915,24 @@ lucide.createIcons();
                             ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
                         </div>
                     `
-                    : isTemplateMessage
+                    : (isTemplateMessage || isHandoffMessage)
                         ? `
                             <div class="chat-template-body">
-                                <p class="chat-template-label">Template Message</p>
-                                <p class="chat-template-text">${escapeHtml(msg.text || '[Template message]')}</p>
+                                <p class="chat-template-label">${isHandoffMessage ? 'Human Transfer' : 'Template Message'}</p>
+                                <p class="chat-template-text">${escapeHtml(msg.text || (isHandoffMessage ? '[Chat transferred to human]' : '[Template message]'))}</p>
                             </div>
                         `
                     : escapeHtml(msg.text || '[Unsupported message type]');
-                const bubbleClass = isTemplateMessage
+                const bubbleClass = (isTemplateMessage || isHandoffMessage)
                     ? 'chat-bubble-template p-2.5 shadow-sm text-sm text-gray-800'
                     : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800`;
-                wrap.className = 'flex flex-col ' + (incoming ? 'items-start' : 'items-end');
+                wrap.className = 'flex flex-col ' + ((isTemplateMessage || isHandoffMessage) ? 'items-center' : (incoming ? 'items-start' : 'items-end'));
                 wrap.innerHTML = `
-                        <div class="chat-message-row">
+                        <div class="chat-message-row" data-message-id="${escapeHtml(msg.id || '')}" data-message-key="${escapeHtml(clientKey)}">
                         ${forwardMode ? `<input class="chat-forward-check" type="checkbox" data-forward-id="${escapeHtml(clientKey)}" ${forwardSelectionIds.has(clientKey) ? 'checked' : ''}>` : ''}
                         <button type="button" class="chat-message-menu-btn" data-menu-id="${escapeHtml(clientKey)}">&#9662;</button>
                         ${openMessageMenuId === clientKey ? `
-                            <div class="chat-message-menu ${incoming ? 'chat-message-menu-open-right' : 'chat-message-menu-open-left'}">
+                            <div class="chat-message-menu">
                                 <button type="button" data-action="reply" data-message-key="${escapeHtml(clientKey)}">Reply</button>
                                 <button type="button" data-action="forward" data-message-key="${escapeHtml(clientKey)}">Forward</button>
                             </div>
@@ -1891,6 +1947,7 @@ lucide.createIcons();
                 chatMessages.appendChild(wrap);
             });
             chatMessages.scrollTop = chatMessages.scrollHeight;
+            positionOpenMessageMenus();
             updateChatWindowState(waId);
         }
 
@@ -1944,6 +2001,7 @@ lucide.createIcons();
                 item.dataset.universityName = nextUniversityName;
                 item.dataset.semester = nextSemester;
                 item.dataset.timezone = nextTimezone;
+                item.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : 'human');
                 item.innerHTML = `
                     <div class="contact-card-top">
                         <div class="contact-identity">
@@ -2003,6 +2061,7 @@ lucide.createIcons();
                 existing.dataset.universityName = nextUniversityName;
                 existing.dataset.semester = nextSemester;
                 existing.dataset.timezone = nextTimezone;
+                existing.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : existing.dataset.aiMode || 'human');
                 const metaEl = existing.querySelector('.contact-meta') || existing.querySelector('p');
                 if (metaEl) {
                     metaEl.classList.add('contact-meta');
@@ -2013,6 +2072,7 @@ lucide.createIcons();
             if (tagSelect) tagSelect.value = nextTag;
             if (activeWhatsappWaId && activeWhatsappWaId === normalizedWaId) {
                 setActiveContactItem(existing);
+                updateAiAssistButtonState(existing);
             }
             const latestMessageTimestamp = Array.isArray(whatsappMessagesByContact[normalizedWaId]) && whatsappMessagesByContact[normalizedWaId].length
                 ? whatsappMessagesByContact[normalizedWaId][whatsappMessagesByContact[normalizedWaId].length - 1]?.timestamp
@@ -2158,7 +2218,8 @@ lucide.createIcons();
                     upsertWhatsappContact({
                         waId,
                         profileName: entry.profileName || waId,
-                        updatedAt: entry.updatedAt || ''
+                        updatedAt: entry.updatedAt || '',
+                        aiState: entry.aiState || null
                     }, false);
                     const item = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
                     if (item) {
@@ -2286,6 +2347,7 @@ lucide.createIcons();
         migrateWhatsappContactIdsToSixDigitSeries();
         setActiveContactItem(null);
         updateTaskClientInputFromContact(null);
+        updateAiAssistButtonState(null);
         restoreManualContactsFromStorage();
         scheduleContactOrderRefresh();
         initWhatsappSync();
@@ -2688,6 +2750,38 @@ lucide.createIcons();
             if (!chatFileInput) return;
             chatFileInput.click();
         };
+        if (aiAssistBtn) {
+            aiAssistBtn.onclick = async function() {
+                if (!activeWhatsappWaId) {
+                    alert('Select a contact first.');
+                    return;
+                }
+                try {
+                    const res = await whatsappFetch('/api/ai-agent/contact-mode', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            waId: normalizeWaId(activeWhatsappWaId),
+                            mode: 'ai'
+                        })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data?.ok) {
+                        throw new Error(data?.error || 'Failed to transfer chat to AI');
+                    }
+                    const activeItem = contactList.querySelector('.contact-item[data-wa-id="' + normalizeWaId(activeWhatsappWaId) + '"]');
+                    if (activeItem) {
+                        activeItem.dataset.aiMode = 'ai';
+                        updateAiAssistButtonState(activeItem);
+                    }
+                    alert('This chat has been transferred to AI.');
+                } catch (err) {
+                    alert('AI transfer failed: ' + (err?.message || 'Unknown error'));
+                }
+            };
+        }
         if (chatFileInput) {
             chatFileInput.addEventListener('change', function() {
                 queueAttachments(this.files || []);
@@ -2723,6 +2817,21 @@ lucide.createIcons();
                     const messageKey = menuBtn.dataset.menuId || '';
                     openMessageMenuId = openMessageMenuId === messageKey ? '' : messageKey;
                     renderWhatsappMessages(activeWhatsappWaId);
+                    return;
+                }
+
+                const quoteBtn = event.target.closest('.chat-reply-quote[data-reply-target-id], .chat-reply-quote[data-reply-target-key]');
+                if (quoteBtn) {
+                    const targetId = quoteBtn.dataset.replyTargetId || '';
+                    const targetKey = quoteBtn.dataset.replyTargetKey || '';
+                    const target = targetId
+                        ? chatMessages.querySelector('.chat-message-row[data-message-id="' + CSS.escape(targetId) + '"]')
+                        : chatMessages.querySelector('.chat-message-row[data-message-key="' + CSS.escape(targetKey) + '"]');
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        target.classList.add('is-reply-target');
+                        setTimeout(() => target.classList.remove('is-reply-target'), 1800);
+                    }
                     return;
                 }
 
@@ -2766,6 +2875,7 @@ lucide.createIcons();
                 }
             });
         }
+        window.addEventListener('resize', positionOpenMessageMenus);
         async function fileToDataUrl(file) {
             return await new Promise((resolve, reject) => {
                 const reader = new FileReader();

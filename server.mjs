@@ -32,8 +32,16 @@ const aiAgentHumanQueueName = String(process.env.AI_AGENT_HUMAN_QUEUE_NAME || 'H
 const aiAgentHandoffMessage = String(process.env.AI_AGENT_HANDOFF_MESSAGE || 'I am transferring you to a human agent for pricing and final quotation.').trim();
 const aiAgentBusinessContext = String(process.env.AI_AGENT_BUSINESS_CONTEXT || '').trim();
 const aiAgentServiceCatalog = String(process.env.AI_AGENT_SERVICE_CATALOG || '').trim();
-const aiAgentToneGuide = String(process.env.AI_AGENT_TONE_GUIDE || 'Friendly, concise, helpful, professional, and clear.').trim();
+const aiAgentToneGuide = String(process.env.AI_AGENT_TONE_GUIDE || 'Professional, polished, concise, respectful, confident, and clear.').trim();
+const aiAgentLanguagePolicy = String(process.env.AI_AGENT_LANGUAGE_POLICY || 'Reply in the client\'s language whenever possible. If the client writes in Hindi, reply in Hindi. If the client writes in English, reply in English. If the client mixes Hindi and English, reply naturally in professional Hinglish. If the language is unclear, use simple professional English.').trim();
 const aiAgentMaxRepliesPerLead = Math.max(1, Number(process.env.AI_AGENT_MAX_REPLIES_PER_LEAD || 12) || 12);
+const aiAgentAlwaysActiveWaIds = new Set(
+    String(process.env.AI_AGENT_ALWAYS_ACTIVE_WA_IDS || '')
+        .split(',')
+        .map((value) => normalizeWaId(value))
+        .filter(Boolean)
+);
+const aiAttachmentInlineMaxBytes = Math.max(1024, Number(process.env.AI_ATTACHMENT_INLINE_MAX_BYTES || (18 * 1024 * 1024)) || (18 * 1024 * 1024));
 
 app.use(cors());
 app.disable('x-powered-by');
@@ -298,6 +306,86 @@ async function backupIncomingMediaToStorage({ waId, messageId, timestamp, attach
     }
 }
 
+async function processIncomingMediaMessage({ waId, profileName, storedMessage, timestamp }) {
+    if (!storedMessage?.mediaId) return;
+    try {
+        const { buffer, mimeType: resolvedMimeType } = await fetchWhatsappMediaBuffer(storedMessage.mediaId);
+        const effectiveMimeType = storedMessage.mimeType || resolvedMimeType;
+        const fileName = storedMessage.attachmentName && !['Image', 'Video', 'Audio', 'Document'].includes(String(storedMessage.attachmentName))
+            ? storedMessage.attachmentName
+            : `media_${storedMessage.mediaId}.${inferFileExtension(effectiveMimeType, storedMessage.attachmentName)}`;
+
+        const [attachmentUrl, summaryText] = await Promise.all([
+            uploadMediaBufferToStorage({
+                waId,
+                messageId: storedMessage.id,
+                timestamp,
+                fileName,
+                mimeType: effectiveMimeType,
+                buffer
+            }).catch((error) => {
+                console.warn('[storage] Failed to back up incoming media:', error?.message || error);
+                return '';
+            }),
+            summarizeIncomingMediaWithGemini({
+                buffer,
+                mimeType: effectiveMimeType,
+                attachmentName: fileName,
+                messageType: storedMessage.messageType || ''
+            }).catch((error) => {
+                console.warn('[ai-agent] Failed to summarize incoming media:', error?.message || error);
+                return '';
+            })
+        ]);
+
+        if (attachmentUrl) {
+            storedMessage.attachmentUrl = attachmentUrl;
+        }
+        if (summaryText) {
+            storedMessage.text = summaryText;
+        }
+        storedMessage.mimeType = effectiveMimeType;
+        await persistMessageSnapshot(waId, storedMessage);
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                profileName,
+                id: storedMessage.id || '',
+                direction: storedMessage.direction || 'incoming',
+                text: storedMessage.text || '',
+                timestamp: storedMessage.timestamp || timestamp,
+                messageType: storedMessage.messageType || 'text',
+                attachmentName: storedMessage.attachmentName || '',
+                attachmentUrl: storedMessage.attachmentUrl || '',
+                mediaId: storedMessage.mediaId || '',
+                mimeType: storedMessage.mimeType || '',
+                replyTo: storedMessage.replyTo || null
+            }
+        });
+        await handleAiAgentForIncomingMessage({
+            waId,
+            profileName,
+            text: storedMessage.text || `[${String(storedMessage.messageType || 'message')}]`,
+            timestamp,
+            messageId: storedMessage.id || '',
+            messageType: storedMessage.messageType || 'text'
+        });
+    } catch (error) {
+        console.warn('[media] Failed to process incoming media message:', error?.message || error);
+        await handleAiAgentForIncomingMessage({
+            waId,
+            profileName,
+            text: storedMessage.text || `[${String(storedMessage.messageType || 'message')}]`,
+            timestamp,
+            messageId: storedMessage.id || '',
+            messageType: storedMessage.messageType || 'text'
+        }).catch((aiError) => {
+            console.warn('[ai-agent] Failed to process incoming media fallback:', aiError?.message || aiError);
+        });
+    }
+}
+
 async function persistContactSnapshot(contact) {
     if (!contact?.waId) return;
     if (!initFirebasePersistence()) {
@@ -540,6 +628,75 @@ function safeParseJsonObject(rawText) {
     }
 }
 
+function buildAttachmentSummaryText(summary) {
+    if (!summary || typeof summary !== 'object') return '';
+    const parts = [];
+    const task = String(summary.task || '').trim();
+    const requirements = String(summary.requirements || '').trim();
+    const deadline = String(summary.deadline || '').trim();
+    const deliverables = Array.isArray(summary.deliverables)
+        ? summary.deliverables.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+        : [];
+    if (task) parts.push(`Task: ${task}`);
+    if (requirements) parts.push(`Need to do: ${requirements}`);
+    if (deadline) parts.push(`Deadline: ${deadline}`);
+    if (deliverables.length) parts.push(`Deliverables: ${deliverables.join(', ')}`);
+    return parts.join('\n').trim();
+}
+
+async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentName, messageType }) {
+    if (!aiAgentApiKey || !buffer?.length) return '';
+    if (buffer.length > aiAttachmentInlineMaxBytes) {
+        return '';
+    }
+
+    const prompt = [
+        'Analyze this client attachment for a service CRM.',
+        'Understand the work/assignment shown in the attachment and extract only what is clearly supported by the file.',
+        'Return JSON only with this exact shape:',
+        '{"task":"","requirements":"","deadline":"","deliverables":[]}',
+        'Rules:',
+        '- task: one short sentence explaining what the client wants done.',
+        '- requirements: short bullet-style sentence of what needs to be completed.',
+        '- deadline: exact date/time if visible, otherwise empty string.',
+        '- deliverables: short list like essay, ppt, code, report, answers, slides.',
+        '- If the attachment is unreadable, return best effort with empty strings.',
+        `Attachment name: ${attachmentName || ''}`,
+        `Attachment type: ${messageType || mimeType || 'unknown'}`
+    ].join('\n');
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [{
+                role: 'user',
+                parts: [
+                    { text: prompt },
+                    {
+                        inlineData: {
+                            mimeType: mimeType || 'application/octet-stream',
+                            data: buffer.toString('base64')
+                        }
+                    }
+                ]
+            }],
+            generationConfig: {
+                temperature: 0.2,
+                responseMimeType: 'application/json'
+            }
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || 'Gemini attachment summary failed');
+    }
+    const parsed = safeParseJsonObject(extractTextFromGeminiResponse(data));
+    return buildAttachmentSummaryText(parsed);
+}
+
 function isPricingIntent(text) {
     const value = String(text || '').toLowerCase();
     if (!value) return false;
@@ -576,10 +733,17 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
     const prompt = [
         'You are UniSolvex CRM WhatsApp AI agent.',
         `Tone guide: ${aiAgentToneGuide}`,
+        `Language policy: ${aiAgentLanguagePolicy}`,
         aiAgentBusinessContext ? `Business context:\n${aiAgentBusinessContext}` : '',
         aiAgentServiceCatalog ? `Service catalog:\n${aiAgentServiceCatalog}` : '',
         'Rules:',
-        '- Reply naturally, briefly, and helpfully.',
+        '- Reply naturally, professionally, briefly, and helpfully.',
+        '- Sound like a polished client-facing coordinator, not like casual chat or slangy support.',
+        '- Match the client language used in the latest message and the conversation context.',
+        '- If the client uses Hindi, reply in clear professional Hindi.',
+        '- If the client uses English, reply in clear professional English.',
+        '- If the client mixes Hindi and English, reply in natural professional Hinglish.',
+        '- Keep wording easy to understand and avoid robotic phrasing.',
         '- Never provide any price, quote, fee, discount, budget, or payment commitment.',
         '- If the user asks about pricing, quotation, charges, fees, budget, discount, or payment, set handoffToHuman=true.',
         '- If the user is clearly asking for quotation or negotiation, stop AI handling and hand off to a human.',
@@ -993,6 +1157,7 @@ async function sendWhatsappTextMessage({ waId, text, contextMessageId = '', send
 async function handleAiAgentForIncomingMessage({ waId, profileName, text, timestamp, messageId, messageType }) {
     const normalizedWaId = normalizeWaId(waId);
     if (!aiAgentEnabled || !normalizedWaId) return;
+    const forceAiForThread = aiAgentAlwaysActiveWaIds.has(normalizedWaId);
     const queued = aiReplyQueueByWaId.get(normalizedWaId) || Promise.resolve();
     const nextJob = queued
         .catch(() => {})
@@ -1006,11 +1171,18 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 lastClientMessageAt: timestamp,
                 updatedAt: new Date().toISOString()
             };
+            if (forceAiForThread) {
+                nextState.aiEnabled = true;
+                nextState.handoffToHuman = false;
+                nextState.handoffReason = '';
+                nextState.existingClientSkipped = false;
+                nextState.humanAssignedTo = '';
+            }
 
             if (!nextState.enrolledAt) {
                 const thread = messagesByWaId.get(normalizedWaId) || [];
                 const priorOutgoingCount = thread.filter((row) => row?.direction === 'outgoing').length;
-                if (aiAgentOnlyFirstTimeClients && priorOutgoingCount > 0) {
+                if (!forceAiForThread && aiAgentOnlyFirstTimeClients && priorOutgoingCount > 0) {
                     await persistAiContactState({
                         ...nextState,
                         aiEnabled: false,
@@ -1022,12 +1194,12 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 nextState.enrolledAt = timestamp;
             }
 
-            if (nextState.handoffToHuman || nextState.aiEnabled === false) {
+            if (!forceAiForThread && (nextState.handoffToHuman || nextState.aiEnabled === false)) {
                 await persistAiContactState(nextState);
                 return;
             }
 
-            if ((nextState.aiReplyCount || 0) >= aiAgentMaxRepliesPerLead) {
+            if (!forceAiForThread && (nextState.aiReplyCount || 0) >= aiAgentMaxRepliesPerLead) {
                 await persistAiContactState({
                     ...nextState,
                     handoffToHuman: true,
@@ -1044,7 +1216,7 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 return;
             }
 
-            if (isPricingIntent(text)) {
+            if (!forceAiForThread && isPricingIntent(text)) {
                 await persistAiContactState({
                     ...nextState,
                     handoffToHuman: true,
@@ -1070,7 +1242,7 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 aiState: nextState
             });
 
-            if (decision.handoffToHuman || !decision.replyText) {
+            if (!forceAiForThread && (decision.handoffToHuman || !decision.replyText)) {
                 await persistAiContactState({
                     ...nextState,
                     handoffToHuman: true,
@@ -1098,7 +1270,7 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
 
             await sendWhatsappTextMessage({
                 waId: normalizedWaId,
-                text: decision.replyText,
+                text: String(decision.replyText || '').trim() || 'I checked your message and attachment. Please share any extra details if you want me to guide you further.',
                 senderType: 'ai',
                 route: 'ai-reply'
             });
@@ -1421,40 +1593,6 @@ app.post('/webhook', (req, res) => {
                 void persistContactSnapshot(contact).catch((error) => {
                     console.warn('[storage] Failed to persist contact:', error?.message || error);
                 });
-                if (storedMessage.mediaId) {
-                    void backupIncomingMediaToStorage({
-                        waId,
-                        messageId: storedMessage.id,
-                        timestamp,
-                        attachmentName: storedMessage.attachmentName,
-                        mediaId: storedMessage.mediaId,
-                        mimeType: storedMessage.mimeType
-                    }).then((attachmentUrl) => {
-                        if (!attachmentUrl) return;
-                        storedMessage.attachmentUrl = attachmentUrl;
-                        return persistMessageSnapshot(waId, storedMessage).then(() => {
-                            broadcast({
-                                type: 'whatsapp_message',
-                                payload: {
-                                    waId,
-                                    profileName,
-                                    id: storedMessage.id || '',
-                                    direction: storedMessage.direction || 'incoming',
-                                    text: storedMessage.text || '',
-                                    timestamp: storedMessage.timestamp || timestamp,
-                                    messageType: storedMessage.messageType || 'text',
-                                    attachmentName: storedMessage.attachmentName || '',
-                                    attachmentUrl: storedMessage.attachmentUrl || '',
-                                    mediaId: storedMessage.mediaId || '',
-                                    mimeType: storedMessage.mimeType || '',
-                                    replyTo: storedMessage.replyTo || null
-                                }
-                            });
-                        });
-                    }).catch((error) => {
-                        console.warn('[storage] Failed to persist incoming media backup:', error?.message || error);
-                    });
-                }
                 void persistMessageSnapshot(waId, storedMessage).catch((error) => {
                     console.warn('[storage] Failed to persist message:', error?.message || error);
                 });
@@ -1481,16 +1619,25 @@ app.post('/webhook', (req, res) => {
                         replyTo
                     }
                 });
-                void handleAiAgentForIncomingMessage({
-                    waId,
-                    profileName,
-                    text,
-                    timestamp,
-                    messageId: incomingMessage.id || '',
-                    messageType: storedMessage.messageType || 'text'
-                }).catch((error) => {
-                    console.warn('[ai-agent] Failed to process incoming message:', error?.message || error);
-                });
+                if (storedMessage.mediaId) {
+                    void processIncomingMediaMessage({
+                        waId,
+                        profileName,
+                        storedMessage,
+                        timestamp
+                    });
+                } else {
+                    void handleAiAgentForIncomingMessage({
+                        waId,
+                        profileName,
+                        text,
+                        timestamp,
+                        messageId: incomingMessage.id || '',
+                        messageType: storedMessage.messageType || 'text'
+                    }).catch((error) => {
+                        console.warn('[ai-agent] Failed to process incoming message:', error?.message || error);
+                    });
+                }
             });
 
             statuses.forEach((statusEvent) => {

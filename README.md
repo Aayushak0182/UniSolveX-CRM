@@ -125,10 +125,12 @@ GEMINI_API_KEY=your_gemini_api_key
 AI_AGENT_ONLY_FIRST_TIME_CLIENTS=true
 AI_AGENT_HUMAN_QUEUE_NAME=Sales Team
 AI_AGENT_HANDOFF_MESSAGE=I am transferring you to a human agent for pricing and final quotation.
-AI_AGENT_TONE_GUIDE=Friendly, concise, helpful, and professional.
+AI_AGENT_TONE_GUIDE=Professional, polished, concise, respectful, confident, and clear.
+AI_AGENT_LANGUAGE_POLICY=Reply in the client's language whenever possible. If the client writes in Hindi, reply in Hindi. If the client writes in English, reply in English. If the client mixes Hindi and English, reply naturally in professional Hinglish. If the language is unclear, use simple professional English.
 AI_AGENT_BUSINESS_CONTEXT=Describe your company, services, process, and what the AI is allowed to say.
 AI_AGENT_SERVICE_CATALOG=List your supported services, categories, and non-pricing guidance.
 AI_AGENT_MAX_REPLIES_PER_LEAD=12
+AI_AGENT_ALWAYS_ACTIVE_WA_IDS=919876543210
 ```
 
 Useful debug endpoints:

@@ -473,8 +473,8 @@ html[data-theme="dark"] .chat-empty-state {
 }
 .chat-message-menu {
   position: absolute;
-  top: 1.9rem;
-  right: 0;
+  top: 0;
+  left: 0;
   z-index: 15;
   min-width: 7rem;
   background: var(--menu-bg);
@@ -482,14 +482,6 @@ html[data-theme="dark"] .chat-empty-state {
   border-radius: 0.75rem;
   box-shadow: var(--shadow-bubble);
   overflow: hidden;
-}
-.chat-message-menu-open-right {
-  left: 0;
-  right: auto;
-}
-.chat-message-menu-open-left {
-  right: 0;
-  left: auto;
 }
 .chat-message-menu button {
   width: 100%;
@@ -503,6 +495,18 @@ html[data-theme="dark"] .chat-empty-state {
 }
 .chat-message-menu button:hover {
   background: var(--menu-hover);
+}
+.chat-message-menu[data-horizontal="right"] {
+  transform-origin: top left;
+}
+.chat-message-menu[data-horizontal="left"] {
+  transform-origin: top right;
+}
+.chat-message-menu[data-vertical="up"][data-horizontal="right"] {
+  transform-origin: bottom left;
+}
+.chat-message-menu[data-vertical="up"][data-horizontal="left"] {
+  transform-origin: bottom right;
 }
 .chat-forward-check {
   position: absolute;
