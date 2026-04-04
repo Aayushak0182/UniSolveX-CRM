@@ -24,9 +24,17 @@ const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
 const cloudinaryFolder = String(process.env.CLOUDINARY_FOLDER || 'unisolvex-crm').trim() || 'unisolvex-crm';
 const aiAgentEnabled = /^(1|true|yes|on)$/i.test(process.env.AI_AGENT_ENABLED || '');
-const aiAgentProvider = String(process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
-const aiAgentModel = String(process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
-const aiAgentApiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const aiChatProvider = String(process.env.AI_CHAT_PROVIDER || process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
+const aiChatModel = String(
+    process.env.AI_CHAT_MODEL
+    || (aiChatProvider === 'openai' ? (process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-mini') : '')
+    || process.env.AI_AGENT_MODEL
+    || 'gemini-2.5-flash'
+).trim();
+const aiAttachmentProvider = String(process.env.AI_ATTACHMENT_PROVIDER || 'gemini').trim().toLowerCase();
+const aiAttachmentModel = String(process.env.AI_ATTACHMENT_MODEL || process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
+const geminiApiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 const aiAgentOnlyFirstTimeClients = !/^(0|false|no|off)$/i.test(process.env.AI_AGENT_ONLY_FIRST_TIME_CLIENTS || 'true');
 const aiAgentHumanQueueName = String(process.env.AI_AGENT_HUMAN_QUEUE_NAME || 'Human Agent').trim() || 'Human Agent';
 const aiAgentHandoffMessage = String(process.env.AI_AGENT_HANDOFF_MESSAGE || 'I am transferring you to a human agent for pricing and final quotation.').trim();
@@ -628,6 +636,18 @@ function safeParseJsonObject(rawText) {
     }
 }
 
+function extractTextFromOpenAiResponse(data) {
+    if (typeof data?.output_text === 'string' && data.output_text.trim()) {
+        return data.output_text.trim();
+    }
+    const output = Array.isArray(data?.output) ? data.output : [];
+    return output
+        .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+        .map((part) => String(part?.text || part?.output_text || ''))
+        .join('\n')
+        .trim();
+}
+
 function buildAttachmentSummaryText(summary) {
     if (!summary || typeof summary !== 'object') return '';
     const parts = [];
@@ -645,7 +665,7 @@ function buildAttachmentSummaryText(summary) {
 }
 
 async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentName, messageType }) {
-    if (!aiAgentApiKey || !buffer?.length) return '';
+    if (aiAttachmentProvider !== 'gemini' || !geminiApiKey || !buffer?.length) return '';
     if (buffer.length > aiAttachmentInlineMaxBytes) {
         return '';
     }
@@ -665,7 +685,7 @@ async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentNa
         `Attachment type: ${messageType || mimeType || 'unknown'}`
     ].join('\n');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAttachmentModel)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -697,6 +717,60 @@ async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentNa
     return buildAttachmentSummaryText(parsed);
 }
 
+async function generateGeminiAiDecision({ prompt }) {
+    if (!geminiApiKey) {
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for Gemini chat replies');
+    }
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiChatModel)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [{
+                role: 'user',
+                parts: [{ text: prompt }]
+            }],
+            generationConfig: {
+                temperature: 0.5,
+                responseMimeType: 'application/json'
+            }
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || 'Gemini generateContent failed');
+    }
+    return safeParseJsonObject(extractTextFromGeminiResponse(data));
+}
+
+async function generateOpenAiAiDecision({ prompt }) {
+    if (!openAiApiKey) {
+        throw new Error('OPENAI_API_KEY is required for OpenAI chat replies');
+    }
+    const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${openAiApiKey}`
+        },
+        body: JSON.stringify({
+            model: aiChatModel,
+            input: prompt,
+            text: {
+                format: {
+                    type: 'json_object'
+                }
+            }
+        })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data?.error?.message || 'OpenAI responses failed');
+    }
+    return safeParseJsonObject(extractTextFromOpenAiResponse(data));
+}
+
 function isPricingIntent(text) {
     const value = String(text || '').toLowerCase();
     if (!value) return false;
@@ -722,11 +796,11 @@ function buildAiConversationTranscript(waId, limit = 16) {
 }
 
 async function generateAiAgentDecision({ waId, profileName, latestMessageText, aiState }) {
-    if (!aiAgentApiKey) {
-        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for AI agent replies');
+    if (aiChatProvider === 'gemini' && !geminiApiKey) {
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for Gemini chat replies');
     }
-    if (aiAgentProvider !== 'gemini') {
-        throw new Error(`Unsupported AI agent provider "${aiAgentProvider}". Set AI_AGENT_PROVIDER=gemini.`);
+    if (aiChatProvider === 'openai' && !openAiApiKey) {
+        throw new Error('OPENAI_API_KEY is required for OpenAI chat replies');
     }
 
     const transcript = buildAiConversationTranscript(waId);
@@ -775,27 +849,14 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
         '{"shouldReply":true,"replyText":"...","handoffToHuman":false,"handoffReason":"","intent":"...","confidence":0.0}'
     ].filter(Boolean).join('\n');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            contents: [{
-                role: 'user',
-                parts: [{ text: prompt }]
-            }],
-            generationConfig: {
-                temperature: 0.5,
-                responseMimeType: 'application/json'
-            }
-        })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(data?.error?.message || 'Gemini generateContent failed');
+    let parsed = null;
+    if (aiChatProvider === 'openai') {
+        parsed = await generateOpenAiAiDecision({ prompt });
+    } else if (aiChatProvider === 'gemini') {
+        parsed = await generateGeminiAiDecision({ prompt });
+    } else {
+        throw new Error(`Unsupported AI chat provider "${aiChatProvider}". Use openai or gemini.`);
     }
-    const parsed = safeParseJsonObject(extractTextFromGeminiResponse(data));
     if (!parsed || typeof parsed !== 'object') {
         throw new Error('AI agent returned invalid JSON response');
     }
