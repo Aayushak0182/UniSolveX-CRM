@@ -14,16 +14,28 @@
 <body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
 
     <!-- Navigation Bar -->
-    <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
+    <nav class="animated-nav bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
+        <div class="nav-ambient" aria-hidden="true">
+            <span class="nav-shooting-star nav-shooting-star-one"></span>
+            <span class="nav-shooting-star nav-shooting-star-two"></span>
+            <span class="nav-shooting-star nav-shooting-star-three"></span>
+        </div>
         <div class="brand-lockup flex items-center gap-3">
             <div class="brand-mark">
                 <span class="brand-mark-glow"></span>
+                <span class="brand-runner" aria-hidden="true">
+                    <span class="brand-runner-track"></span>
+                    <span class="brand-runner-body">
+                        <span class="brand-runner-head"></span>
+                        <span class="brand-runner-tail"></span>
+                    </span>
+                </span>
                 <img src="/favicon.ico?v=2" alt="UniSolveX" class="brand-mark-icon">
             </div>
             <span class="brand-wordmark font-bold text-xl text-gray-800">UniSolveX <span class="brand-wordmark-accent text-indigo-600">CRM</span></span>
         </div>
         <div class="flex items-center gap-3 border-l pl-4">
-            <div class="text-right leading-tight">
+            <div id="adminServerStatusPanel" class="text-right leading-tight">
                 <div id="whatsappStatus" class="text-[11px] font-semibold text-gray-500 whitespace-nowrap">WA: checking...</div>
                 <div id="whatsappLastEvent" class="text-[10px] text-gray-400 whitespace-nowrap">Last webhook: -</div>
             </div>

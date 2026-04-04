@@ -1,11 +1,16 @@
 lucide.createIcons();
         // Show agent name from localStorage
         const storedAgentName = localStorage.getItem('agentName');
+        const storedAgentRole = localStorage.getItem('agentRole') || 'agent';
         if (!storedAgentName) {
             window.location.href = 'login.html';
         }
+        const adminServerStatusPanel = document.getElementById('adminServerStatusPanel');
         const agentName = storedAgentName || 'Aayush';
-        document.getElementById('agentNameDisplay').textContent = 'Agent: ' + agentName;
+        if (adminServerStatusPanel && storedAgentRole !== 'admin') {
+            adminServerStatusPanel.classList.add('hidden');
+        }
+        document.getElementById('agentNameDisplay').textContent = (storedAgentRole === 'admin' ? 'Admin: ' : 'Agent: ') + agentName;
         document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
         const themeToggleBtn = document.getElementById('themeToggleBtn');
         const themeIconSun = document.getElementById('themeIconSun');
@@ -3146,6 +3151,7 @@ lucide.createIcons();
         // Logout
         document.getElementById('logoutBtn').onclick = function() {
             localStorage.removeItem('agentName');
+            localStorage.removeItem('agentRole');
             window.location.href = 'login.html';
         };
 
