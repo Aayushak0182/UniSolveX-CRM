@@ -63,6 +63,7 @@ lucide.createIcons();
         const chatForwardTargetHintEl = document.getElementById('chatForwardTargetHint');
         const cancelForwardBtn = document.getElementById('cancelForwardBtn');
         const confirmForwardBtn = document.getElementById('confirmForwardBtn');
+        const chatAiModeHintEl = document.getElementById('chatAiModeHint');
         const notifyBtn = document.getElementById('notifyBtn');
         const sendBtn = document.getElementById('sendBtn');
         const attachFileBtn = document.getElementById('attachFileBtn');
@@ -627,9 +628,39 @@ lucide.createIcons();
             const mode = String(activeItem?.dataset?.aiMode || 'human');
             aiAssistBtn.disabled = !activeItem;
             aiAssistBtn.classList.toggle('is-active', Boolean(activeItem) && mode === 'ai');
+            if (chatAiModeHintEl) {
+                chatAiModeHintEl.classList.toggle('hidden', !(activeItem && mode === 'ai'));
+            }
             aiAssistBtn.title = activeItem
                 ? (mode === 'ai' ? 'AI is active for this chat' : 'Transfer this chat to AI')
                 : 'Select a contact first';
+        }
+
+        async function setContactAiMode(waId, mode) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId || !['ai', 'human'].includes(String(mode || '').trim().toLowerCase())) {
+                throw new Error('Valid waId and mode are required');
+            }
+            const res = await whatsappFetch('/api/ai-agent/contact-mode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    waId: normalizedWaId,
+                    mode
+                })
+            });
+            const data = await res.json();
+            if (!res.ok || !data?.ok) {
+                throw new Error(data?.error || 'Failed to update contact mode');
+            }
+            const activeItem = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            if (activeItem) {
+                activeItem.dataset.aiMode = mode;
+                updateAiAssistButtonState(activeItem);
+            }
+            return data;
         }
 
         function refreshContactOrder() {
@@ -1471,6 +1502,7 @@ lucide.createIcons();
             updateContactStateUI(item);
 
             const menuToggleBtn = item.querySelector('.contact-menu-toggle');
+            const assignAgentBtn = item.querySelector('.contact-action-assign-agent');
             const pinBtn = item.querySelector('.contact-action-pin');
             const readToggleBtn = item.querySelector('.contact-action-read');
             const archiveToggleBtn = item.querySelector('.contact-action-archive');
@@ -1500,6 +1532,20 @@ lucide.createIcons();
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
+                });
+            }
+
+            if (assignAgentBtn) {
+                assignAgentBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    try {
+                        await setContactAiMode(item.dataset.waId || '', 'human');
+                        openContactMenuId = '';
+                        item.classList.remove('is-menu-open');
+                        item.querySelector('.contact-card-menu')?.classList.add('hidden');
+                    } catch (err) {
+                        alert('Assign to agent failed: ' + (err?.message || 'Unknown error'));
+                    }
                 });
             }
 
@@ -2030,6 +2076,7 @@ lucide.createIcons();
                         </div>
                     </div>
                     <div class="contact-card-menu hidden">
+                        <button type="button" class="contact-action-assign-agent">Assign to Agent</button>
                         <button type="button" class="contact-action-pin">Pin chat</button>
                         <label class="contact-menu-label-wrap">
                             <span>Label chat</span>
@@ -2757,25 +2804,7 @@ lucide.createIcons();
                     return;
                 }
                 try {
-                    const res = await whatsappFetch('/api/ai-agent/contact-mode', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            waId: normalizeWaId(activeWhatsappWaId),
-                            mode: 'ai'
-                        })
-                    });
-                    const data = await res.json();
-                    if (!res.ok || !data?.ok) {
-                        throw new Error(data?.error || 'Failed to transfer chat to AI');
-                    }
-                    const activeItem = contactList.querySelector('.contact-item[data-wa-id="' + normalizeWaId(activeWhatsappWaId) + '"]');
-                    if (activeItem) {
-                        activeItem.dataset.aiMode = 'ai';
-                        updateAiAssistButtonState(activeItem);
-                    }
+                    await setContactAiMode(activeWhatsappWaId, 'ai');
                     alert('This chat has been transferred to AI.');
                 } catch (err) {
                     alert('AI transfer failed: ' + (err?.message || 'Unknown error'));
