@@ -2,6 +2,14 @@ lucide.createIcons();
         // Show agent name from localStorage
         const storedAgentName = localStorage.getItem('agentName');
         const storedAgentRole = localStorage.getItem('agentRole') || 'agent';
+        const isAdminUser = storedAgentRole === 'admin';
+        const adminQuickMenuWrap = document.getElementById('adminQuickMenuWrap');
+        const adminQuickMenuBtn = document.getElementById('adminQuickMenuBtn');
+        const adminQuickMenu = document.getElementById('adminQuickMenu');
+        const navExportClientsBtn = document.getElementById('navExportClientsBtn');
+        const navExportExpertsBtn = document.getElementById('navExportExpertsBtn');
+        const navImportExpertsBtn = document.getElementById('navImportExpertsBtn');
+        const importExpertsFileInput = document.getElementById('importExpertsFileInput');
         if (!storedAgentName) {
             window.location.href = 'login.html';
         }
@@ -35,6 +43,23 @@ lucide.createIcons();
         const orderTabAll = document.getElementById('orderTabAll');
         const orderDetailsModal = document.getElementById('orderDetailsModal');
         const clientDetailsModal = document.getElementById('clientDetailsModal');
+        const exportClientsModal = document.getElementById('exportClientsModal');
+        const exportClientsFromDateInput = document.getElementById('exportClientsFromDate');
+        const exportClientsToDateInput = document.getElementById('exportClientsToDate');
+        const closeExportClientsModalBtn = document.getElementById('closeExportClientsModalBtn');
+        const cancelExportClientsBtn = document.getElementById('cancelExportClientsBtn');
+        const confirmExportClientsBtn = document.getElementById('confirmExportClientsBtn');
+        const expertNotifyModal = document.getElementById('expertNotifyModal');
+        const closeExpertNotifyModalBtn = document.getElementById('closeExpertNotifyModalBtn');
+        const cancelExpertNotifyBtn = document.getElementById('cancelExpertNotifyBtn');
+        const confirmExpertNotifyBtn = document.getElementById('confirmExpertNotifyBtn');
+        const expertNotifyTaskMeta = document.getElementById('expertNotifyTaskMeta');
+        const expertNotifySearch = document.getElementById('expertNotifySearch');
+        const expertNotifySelectAll = document.getElementById('expertNotifySelectAll');
+        const expertNotifyList = document.getElementById('expertNotifyList');
+        if (adminQuickMenuWrap && isAdminUser) {
+            adminQuickMenuWrap.classList.remove('hidden');
+        }
         const taskServiceType = document.getElementById('taskServiceType');
         const taskClientInput = document.getElementById('taskClientInput');
         const taskModalTitle = document.getElementById('taskModalTitle');
@@ -54,6 +79,7 @@ lucide.createIcons();
         const chatFileInput = document.getElementById('chatFileInput');
         const odActualDeadlineInput = document.getElementById('odActualDeadline');
         const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
+        const odExpertPaymentStatusInput = document.getElementById('odExpertPaymentStatus');
         const chatHeaderEl = document.getElementById('chatHeader');
         const chatHeaderTitle = document.getElementById('chatHeaderTitle');
         const chatHeaderAvatar = document.getElementById('chatHeaderAvatar');
@@ -74,12 +100,16 @@ lucide.createIcons();
         const attachFileBtn = document.getElementById('attachFileBtn');
         const aiAssistBtn = document.getElementById('aiAssistBtn');
         let activeOrderCard = null;
+        let activeNotifyOrderCard = null;
         let activeWhatsappWaId = '';
         const orderSequenceByClient = {};
         const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
+        const ORDER_DETAILS_DRAFTS_STORAGE_KEY = 'unisolvex_order_details_drafts_v1';
         const MANUAL_CONTACTS_STORAGE_KEY = 'unisolvex_manual_contacts_v1';
+        const EXPERTS_STORAGE_KEY = 'unisolvex_experts_v1';
         const WHATSAPP_CONTACT_ID_MAP_KEY = 'unisolvex_whatsapp_contact_id_map_v1';
         const WHATSAPP_CONTACT_ID_SEQUENCE_KEY = 'unisolvex_whatsapp_contact_id_seq_v1';
+        const EXPERT_ID_SEQUENCE_KEY = 'unisolvex_expert_id_seq_v1';
         const WHATSAPP_READ_STATE_STORAGE_KEY = 'unisolvex_whatsapp_read_state_v1';
         const WHATSAPP_API_BASE_STORAGE_KEY = 'whatsappApiBase';
         const WHATSAPP_LAST_WORKING_API_BASE_KEY = 'unisolvex_last_working_whatsapp_api_base_v1';
@@ -118,6 +148,29 @@ lucide.createIcons();
         const whatsappTextSendQueue = [];
         const forwardSelectionIds = new Set();
         let activeOrderTab = 'mine';
+        let experts = [];
+        let selectedNotifyExpertIds = new Set();
+        const ORDER_DETAILS_DRAFT_FIELD_IDS = [
+            'odTitle',
+            'odStatus',
+            'odAssignedTo',
+            'odLabels',
+            'odActualDeadline',
+            'odExpertDeadline',
+            'odBaseCurrency',
+            'odBaseAmountValue',
+            'odExpertPayout',
+            'odAdditionalCharges',
+            'odClientPaidCurrency',
+            'odClientPaidAmount',
+            'odPaymentStatusOverride',
+            'odDescription',
+            'odTopic',
+            'odExpertPaymentStatus',
+            'odSessionStart',
+            'odSessionDuration',
+            'odActivity'
+        ];
         let activeClientDetailsWaId = '';
         let clientDetailsEditMode = false;
         let crmStateSaveTimer = null;
@@ -345,12 +398,15 @@ lucide.createIcons();
 
         function getCurrentCrmStatePayload() {
             const rawSequence = Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
+            const rawExpertSequence = Number(localStorage.getItem(EXPERT_ID_SEQUENCE_KEY) || '1');
             return {
                 orderListHtml: localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '',
                 manualContacts: readManualContactsFromStorage(),
+                experts: readExpertsFromStorage(),
                 whatsappContactIdMap: readWhatsappContactIdMapFromStorage(),
                 whatsappReadState: readWhatsappReadStateFromStorage(),
-                whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100
+                whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100,
+                expertIdSequence: Number.isFinite(rawExpertSequence) ? rawExpertSequence : 1
             };
         }
 
@@ -393,6 +449,9 @@ lucide.createIcons();
             Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
                 syncOrderServiceTag(card);
                 syncOrderPaymentIndicator(card);
+                syncOrderExpertPaymentIndicator(card);
+                syncOrderExpertSummary(card);
+                syncOrderNotifyButton(card);
                 applyCardTypeStyle(card, card.dataset.serviceType || card.querySelector('.order-title')?.textContent || '');
                 applyDeadlineStyles(card);
                 const cardClientId = (card.dataset.clientId || '').replace(/\D/g, '');
@@ -425,6 +484,7 @@ lucide.createIcons();
 
                 localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
                 localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.manualContacts) ? state.manualContacts : []));
+                localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.experts) ? state.experts : []));
                 localStorage.setItem(
                     WHATSAPP_CONTACT_ID_MAP_KEY,
                     JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
@@ -437,6 +497,11 @@ lucide.createIcons();
                     Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
                     true
                 );
+                localStorage.setItem(
+                    EXPERT_ID_SEQUENCE_KEY,
+                    String(Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1)
+                );
+                experts = readExpertsFromStorage();
 
                 orderList.innerHTML = '';
                 restoreOrderListFromStorage();
@@ -494,6 +559,10 @@ lucide.createIcons();
         }
 
         function applyOrderSearchFilter() {
+            if (activeOrderTab === 'expert') {
+                renderExpertList();
+                return;
+            }
             const query = (orderSearch.value || '').trim().toLowerCase().replace('#', '');
             const windowMs = getOrderDeliveryWindowMs();
             const now = new Date();
@@ -541,6 +610,12 @@ lucide.createIcons();
                 if (!btn) return;
                 btn.classList.toggle('is-active', btn.dataset.orderTab === activeOrderTab);
             });
+            if (activeOrderTab === 'expert') {
+                renderExpertList();
+                return;
+            }
+            restoreOrderListFromStorage();
+            rehydrateOrderCardsFromDom();
             applyOrderSearchFilter();
         }
 
@@ -666,6 +741,52 @@ lucide.createIcons();
                 updateAiAssistButtonState(activeItem);
             }
             return data;
+        }
+
+        async function deleteWhatsappContact(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) {
+                throw new Error('Valid waId is required');
+            }
+            const res = await whatsappFetch('/api/whatsapp/contact/' + encodeURIComponent(normalizedWaId), {
+                method: 'DELETE'
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) {
+                throw new Error(data?.error || 'Failed to delete contact');
+            }
+            return data;
+        }
+
+        function removeContactFromUi(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+
+            const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            if (item) {
+                const itemIndex = contactItems.indexOf(item);
+                if (itemIndex >= 0) contactItems.splice(itemIndex, 1);
+                item.remove();
+            }
+
+            delete whatsappMessagesByContact[normalizedWaId];
+
+            removeManualContact(normalizedWaId);
+            removeWhatsappContactMeta(normalizedWaId);
+
+            if (activeWhatsappWaId === normalizedWaId) {
+                activeWhatsappWaId = '';
+                setActiveContactItem(null);
+                updateChatHeaderVisibility('');
+                updateTaskClientInputFromContact(null);
+                renderWhatsappMessages('');
+                updateAiAssistButtonState(null);
+                clearChatInitiationPreview();
+            }
+
+            openContactMenuId = '';
+            applyContactFilter();
+            scheduleContactOrderRefresh();
         }
 
         function refreshContactOrder() {
@@ -809,6 +930,120 @@ lucide.createIcons();
             }
         }
 
+        function toDateInputValue(date) {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function parseDateInputStart(value) {
+            const text = String(value || '').trim();
+            if (!text) return null;
+            const date = new Date(`${text}T00:00:00`);
+            return Number.isNaN(date.getTime()) ? null : date.getTime();
+        }
+
+        function parseDateInputEnd(value) {
+            const text = String(value || '').trim();
+            if (!text) return null;
+            const date = new Date(`${text}T23:59:59.999`);
+            return Number.isNaN(date.getTime()) ? null : date.getTime();
+        }
+
+        function formatExportDateTime(timestampMs) {
+            const ts = Number(timestampMs || 0);
+            if (!ts) return '';
+            const date = new Date(ts);
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleString();
+        }
+
+        function escapeCsvValue(value) {
+            const text = String(value ?? '');
+            if (/[",\n]/.test(text)) {
+                return `"${text.replace(/"/g, '""')}"`;
+            }
+            return text;
+        }
+
+        function buildClientExportRows(fromMs, toMs) {
+            return contactItems
+                .map((item) => {
+                    const waId = normalizeWaId(item?.dataset?.waId || '');
+                    if (!waId) return null;
+                    const messages = Array.isArray(whatsappMessagesByContact[waId]) ? whatsappMessagesByContact[waId] : [];
+                    const activityTimestamps = messages
+                        .map((message) => new Date(message?.timestamp || 0).getTime())
+                        .filter((value) => Number.isFinite(value) && value > 0);
+                    const fallbackActivity = Number(item?.dataset?.lastActivity || 0) || 0;
+                    if (!activityTimestamps.length && fallbackActivity > 0) {
+                        activityTimestamps.push(fallbackActivity);
+                    }
+                    const firstActivityAt = activityTimestamps.length ? Math.min(...activityTimestamps) : 0;
+                    const lastActivityAt = activityTimestamps.length ? Math.max(...activityTimestamps) : 0;
+                    const matchesRange = (fromMs == null && toMs == null)
+                        ? true
+                        : activityTimestamps.some((ts) => (fromMs == null || ts >= fromMs) && (toMs == null || ts <= toMs));
+
+                    if (!matchesRange) return null;
+
+                    return {
+                        clientName: item.dataset.profileName || item.querySelector('.contact-name')?.textContent?.trim() || waId,
+                        clientId: String(item.dataset.contactId || '').trim(),
+                        whatsappNumber: waId,
+                        firstActivityAt,
+                        lastActivityAt
+                    };
+                })
+                .filter(Boolean)
+                .sort((a, b) => Number(b.lastActivityAt || 0) - Number(a.lastActivityAt || 0));
+        }
+
+        function downloadClientExportCsv(rows, fromValue, toValue) {
+            const header = ['Client Name', 'Client ID', 'WhatsApp Number', 'First Activity', 'Last Activity'];
+            const lines = [header.map(escapeCsvValue).join(',')];
+            rows.forEach((row) => {
+                lines.push([
+                    row.clientName,
+                    row.clientId,
+                    row.whatsappNumber,
+                    formatExportDateTime(row.firstActivityAt),
+                    formatExportDateTime(row.lastActivityAt)
+                ].map(escapeCsvValue).join(','));
+            });
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            const fromPart = String(fromValue || '').trim() || 'all';
+            const toPart = String(toValue || '').trim() || 'latest';
+            anchor.href = url;
+            anchor.download = `unisolvex-clients-${fromPart}-to-${toPart}.csv`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function openExportClientsModal() {
+            if (!exportClientsModal) return;
+            const today = new Date();
+            const thirtyDaysAgo = new Date(today);
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+            if (exportClientsFromDateInput && !exportClientsFromDateInput.value) {
+                exportClientsFromDateInput.value = toDateInputValue(thirtyDaysAgo);
+            }
+            if (exportClientsToDateInput && !exportClientsToDateInput.value) {
+                exportClientsToDateInput.value = toDateInputValue(today);
+            }
+            exportClientsModal.classList.remove('hidden');
+        }
+
+        function closeExportClientsModal() {
+            exportClientsModal?.classList.add('hidden');
+        }
+
         function getManualContactByWaId(waId) {
             const normalizedWaId = normalizeWaId(waId);
             return readManualContactsFromStorage().find((row) => normalizeWaId(row.waId) === normalizedWaId) || null;
@@ -852,6 +1087,246 @@ lucide.createIcons();
             }
         }
 
+        function readExpertsFromStorage() {
+            try {
+                const raw = localStorage.getItem(EXPERTS_STORAGE_KEY);
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                const rows = Array.isArray(parsed) ? parsed : [];
+                const normalized = dedupeExperts(rows);
+                if (JSON.stringify(rows) !== JSON.stringify(normalized)) {
+                    localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(normalized));
+                }
+                localStorage.setItem(EXPERT_ID_SEQUENCE_KEY, String(getNextExpertSequenceFromRows(normalized)));
+                return normalized;
+            } catch {
+                return [];
+            }
+        }
+
+        function readOrderDetailsDrafts() {
+            try {
+                const raw = localStorage.getItem(ORDER_DETAILS_DRAFTS_STORAGE_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch {
+                return {};
+            }
+        }
+
+        function writeOrderDetailsDrafts(drafts) {
+            localStorage.setItem(ORDER_DETAILS_DRAFTS_STORAGE_KEY, JSON.stringify(drafts || {}));
+        }
+
+        function getActiveOrderDraftKey(card = activeOrderCard) {
+            if (!card) return '';
+            const orderId = String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+            const clientId = String(card.dataset.clientId || '').trim();
+            return orderId || clientId || '';
+        }
+
+        function collectOrderDetailsDraft() {
+            const payload = {};
+            ORDER_DETAILS_DRAFT_FIELD_IDS.forEach((id) => {
+                const field = document.getElementById(id);
+                if (!field) return;
+                payload[id] = String(field.value || '');
+            });
+            return payload;
+        }
+
+        function applyOrderDetailsDraft(draft) {
+            if (!draft || typeof draft !== 'object') return;
+            ORDER_DETAILS_DRAFT_FIELD_IDS.forEach((id) => {
+                if (!(id in draft)) return;
+                const field = document.getElementById(id);
+                if (!field) return;
+                field.value = String(draft[id] || '');
+            });
+        }
+
+        function saveActiveOrderDraft() {
+            const draftKey = getActiveOrderDraftKey();
+            if (!draftKey || !orderDetailsModal || orderDetailsModal.classList.contains('hidden')) return;
+            const drafts = readOrderDetailsDrafts();
+            drafts[draftKey] = collectOrderDetailsDraft();
+            writeOrderDetailsDrafts(drafts);
+        }
+
+        function clearOrderDraft(card = activeOrderCard) {
+            const draftKey = getActiveOrderDraftKey(card);
+            if (!draftKey) return;
+            const drafts = readOrderDetailsDrafts();
+            if (!(draftKey in drafts)) return;
+            delete drafts[draftKey];
+            writeOrderDetailsDrafts(drafts);
+        }
+
+        function openOrderDetailsModal(card) {
+            if (!card) return;
+            activeOrderCard = card;
+
+            const title = card.querySelector('.order-title')?.textContent?.trim() || '';
+            const status = card.querySelector('.order-status')?.textContent?.trim() || 'In Progress';
+            const cardId = (card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+            const clientIdText = card.dataset.clientId || cardId;
+            const amount = card.querySelector('.order-amount')?.textContent?.trim() || '';
+            const deadline = card.querySelector('.order-deadline')?.dataset.baseValue || card.querySelector('.order-deadline')?.textContent?.trim() || '';
+
+            document.getElementById('odTitle').value = title;
+            document.getElementById('odServiceType').value = card.dataset.serviceType || title;
+            document.getElementById('odStatus').value = status;
+            document.getElementById('odOrderId').value = cardId;
+            document.getElementById('odClientId').value = clientIdText;
+            document.getElementById('odAssignedTo').value = card.dataset.assignedTo || '';
+            document.getElementById('odCreatedBy').value = card.dataset.createdBy || card.dataset.assignedTo || '';
+            document.getElementById('odLabels').value = card.dataset.labels || '';
+            document.getElementById('odActualDeadline').value = toDateTimeLocalValue(deadline);
+            document.getElementById('odExpertDeadline').value = toDateTimeLocalValue(card.querySelector('.order-expert-deadline')?.dataset.baseValue || card.dataset.expertDeadline || '');
+            applyExpertDeadlineConstraint();
+            const amountMatch = amount.match(/^([A-Za-z]{3})\s+(.+)$/);
+            if (amountMatch) {
+                document.getElementById('odBaseCurrency').value = amountMatch[1].toUpperCase();
+                document.getElementById('odBaseAmountValue').value = amountMatch[2];
+            } else {
+                document.getElementById('odBaseCurrency').value = 'INR';
+                document.getElementById('odBaseAmountValue').value = amount === 'TBD' ? '' : amount;
+            }
+            const expertPayoutRaw = (card.dataset.expertPayout || '').replace(/^INR\s*/i, '').trim();
+            document.getElementById('odExpertPayout').value = expertPayoutRaw;
+            document.getElementById('odAdditionalCharges').value = card.dataset.additionalCharges || '';
+            document.getElementById('odClientPaidCurrency').value = card.dataset.clientPaidCurrency || 'INR';
+            document.getElementById('odClientPaidAmount').value = card.dataset.clientPaidAmount || '';
+            document.getElementById('odPaymentStatusOverride').value = card.dataset.paymentStatusOverride || 'auto';
+            document.getElementById('odDescription').value = card.dataset.description || '';
+            document.getElementById('odTopic').value = card.dataset.topic || '';
+            if (odExpertPaymentStatusInput) odExpertPaymentStatusInput.value = card.dataset.expertPaymentStatus || 'pending';
+            document.getElementById('odSessionStart').value = card.dataset.sessionStart || '';
+            document.getElementById('odSessionDuration').value = card.dataset.sessionDuration || '';
+            document.getElementById('odActivity').value = '';
+            renderCommentHistory(parseComments(card.dataset.comments || '[]'));
+            const draft = readOrderDetailsDrafts()[getActiveOrderDraftKey(card)];
+            applyOrderDetailsDraft(draft);
+            updateOrderDetailsSummary(card);
+            document.body.classList.add('modal-open');
+            orderDetailsModal.classList.remove('hidden');
+            const scrollArea = document.getElementById('orderDetailsScrollArea');
+            if (scrollArea) scrollArea.scrollTop = 0;
+        }
+
+        function closeOrderDetailsModal() {
+            saveActiveOrderDraft();
+            orderDetailsModal.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+        }
+
+        function writeExpertsToStorage(rows, skipRemote) {
+            localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(rows));
+            experts = Array.isArray(rows) ? rows : [];
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
+        function getStoredExpertIdSequence() {
+            return Math.max(1, Number(localStorage.getItem(EXPERT_ID_SEQUENCE_KEY) || '1') || 1);
+        }
+
+        function setExpertIdSequenceInStorage(value, skipRemote) {
+            localStorage.setItem(EXPERT_ID_SEQUENCE_KEY, String(Math.max(1, Number(value || 1) || 1)));
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
+        function getExpertIdNumber(expertId) {
+            const match = String(expertId || '').trim().match(/^USXT(\d+)$/i);
+            return match ? Number(match[1]) || 0 : 0;
+        }
+
+        function getNextExpertSequenceFromRows(rows) {
+            const maxId = (Array.isArray(rows) ? rows : []).reduce((maxValue, row) => {
+                return Math.max(maxValue, getExpertIdNumber(row?.expertId || ''));
+            }, 0);
+            return maxId > 0 ? maxId + 1 : 1;
+        }
+
+        function getPreferredExpertId(...candidates) {
+            const values = candidates
+                .map((value) => String(value || '').trim())
+                .filter(Boolean);
+            if (!values.length) return '';
+            const withNumbers = values
+                .map((value) => ({ value, num: getExpertIdNumber(value) }))
+                .filter((entry) => entry.num > 0)
+                .sort((a, b) => a.num - b.num);
+            return withNumbers[0]?.value || values[0];
+        }
+
+        function dedupeExpertise(values) {
+            const unique = [];
+            (Array.isArray(values) ? values : []).forEach((value) => {
+                const skill = String(value || '').trim();
+                if (!skill) return;
+                if (unique.some((item) => item.toLowerCase() === skill.toLowerCase())) return;
+                unique.push(skill);
+            });
+            return unique;
+        }
+
+        function pickPreferredExpertValue(currentValue, nextValue) {
+            const current = String(currentValue || '').trim();
+            const next = String(nextValue || '').trim();
+            if (!current) return next;
+            if (!next) return current;
+            return next.length >= current.length ? next : current;
+        }
+
+        function mergeExpertRecords(baseRow, incomingRow) {
+            const base = normalizeExpertRecord(baseRow);
+            const incoming = normalizeExpertRecord(incomingRow);
+            return normalizeExpertRecord({
+                expertId: getPreferredExpertId(base.expertId, incoming.expertId),
+                name: pickPreferredExpertValue(base.name, incoming.name),
+                expertise: dedupeExpertise([...(base.expertise || []), ...(incoming.expertise || [])]),
+                rating: pickPreferredExpertValue(base.rating, incoming.rating),
+                education: pickPreferredExpertValue(base.education, incoming.education),
+                waId: base.waId || incoming.waId,
+                createdAt: [base.createdAt, incoming.createdAt].filter(Boolean).sort()[0] || '',
+                updatedAt: [base.updatedAt, incoming.updatedAt].filter(Boolean).sort().pop() || ''
+            });
+        }
+
+        function dedupeExperts(rows) {
+            const sourceRows = Array.isArray(rows) ? rows : [];
+            const byWaId = new Map();
+            const byFallback = new Map();
+
+            sourceRows.forEach((row) => {
+                const normalized = normalizeExpertRecord(row);
+                if (!normalized.name) return;
+                const mapKey = normalized.waId
+                    ? `wa:${normalized.waId}`
+                    : normalized.expertId
+                        ? `id:${normalized.expertId}`
+                        : `name:${normalized.name.toLowerCase()}|edu:${normalized.education.toLowerCase()}`;
+
+                const targetMap = normalized.waId ? byWaId : byFallback;
+                const existing = targetMap.get(mapKey);
+                targetMap.set(mapKey, existing ? mergeExpertRecords(existing, normalized) : normalized);
+            });
+
+            return [...byWaId.values(), ...byFallback.values()]
+                .map((row) => normalizeExpertRecord(row))
+                .filter((row) => row.name)
+                .sort((a, b) => {
+                    const diff = getExpertIdNumber(a.expertId) - getExpertIdNumber(b.expertId);
+                    if (diff !== 0) return diff;
+                    return a.name.localeCompare(b.name);
+                });
+        }
+
         function writeManualContactsToStorage(rows, skipRemote) {
             localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(rows));
             if (!skipRemote) {
@@ -878,6 +1353,383 @@ lucide.createIcons();
                 rows.push(payload);
             }
             writeManualContactsToStorage(rows);
+        }
+
+        function removeManualContact(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+            const rows = readManualContactsFromStorage().filter((row) => normalizeWaId(row?.waId || '') !== normalizedWaId);
+            writeManualContactsToStorage(rows);
+        }
+
+        function removeWhatsappContactMeta(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+
+            try {
+                const idMap = readWhatsappContactIdMapFromStorage();
+                delete idMap[normalizedWaId];
+                localStorage.setItem(WHATSAPP_CONTACT_ID_MAP_KEY, JSON.stringify(idMap));
+            } catch {}
+
+            try {
+                const readState = readWhatsappReadStateFromStorage();
+                delete readState[normalizedWaId];
+                writeWhatsappReadStateToStorage(readState, true);
+            } catch {}
+
+            scheduleCrmStateSave();
+        }
+
+        function normalizeExpertRecord(raw = {}) {
+            return {
+                expertId: String(raw.expertId || '').trim(),
+                name: String(raw.name || '').trim(),
+                expertise: Array.isArray(raw.expertise)
+                    ? raw.expertise.map((item) => String(item || '').trim()).filter(Boolean)
+                    : String(raw.expertise || '')
+                        .split(/[|,]/)
+                        .map((item) => String(item || '').trim())
+                        .filter(Boolean),
+                rating: String(raw.rating || '').trim(),
+                education: String(raw.education || '').trim(),
+                waId: normalizeWaId(raw.waId || ''),
+                createdAt: String(raw.createdAt || ''),
+                updatedAt: String(raw.updatedAt || '')
+            };
+        }
+
+        function getNextExpertId() {
+            const next = getNextExpertSequenceFromRows(readExpertsFromStorage());
+            setExpertIdSequenceInStorage(next + 1);
+            return `USXT${String(next).padStart(4, '0')}`;
+        }
+
+        function saveExperts(rows) {
+            let nextSequence = 1;
+            const normalized = dedupeExperts(rows)
+                .map((row) => normalizeExpertRecord(row))
+                .map((row) => {
+                    const nextRow = normalizeExpertRecord(row);
+                    if (!nextRow.expertId) {
+                        nextRow.expertId = `USXT${String(nextSequence).padStart(4, '0')}`;
+                    }
+                    nextSequence = Math.max(nextSequence, getExpertIdNumber(nextRow.expertId) + 1);
+                    return nextRow;
+                })
+                .filter((row) => row.expertId && row.name);
+            setExpertIdSequenceInStorage(getNextExpertSequenceFromRows(normalized), true);
+            writeExpertsToStorage(normalized);
+            return normalized;
+        }
+
+        function upsertExpert(rawExpert) {
+            const expert = normalizeExpertRecord(rawExpert);
+            if (!expert.name) return null;
+            const nowIso = new Date().toISOString();
+
+            const rows = readExpertsFromStorage();
+            const index = rows.findIndex((row) => {
+                const current = normalizeExpertRecord(row);
+                if (expert.expertId && current.expertId === expert.expertId) return true;
+                if (expert.waId && current.waId && current.waId === expert.waId) return true;
+                if (!expert.waId && current.name.toLowerCase() === expert.name.toLowerCase() && current.education.toLowerCase() === expert.education.toLowerCase()) return true;
+                return false;
+            });
+
+            if (index >= 0) {
+                const existing = normalizeExpertRecord(rows[index]);
+                rows[index] = {
+                    ...existing,
+                    ...expert,
+                    expertId: existing.expertId || expert.expertId || getNextExpertId(),
+                    createdAt: existing.createdAt || expert.createdAt || nowIso,
+                    updatedAt: nowIso
+                };
+            } else {
+                if (!expert.expertId) {
+                    expert.expertId = getNextExpertId();
+                }
+                if (!expert.createdAt) expert.createdAt = nowIso;
+                expert.updatedAt = nowIso;
+                rows.push(expert);
+            }
+            const savedRows = saveExperts(rows);
+            return savedRows.find((row) => (expert.waId && row.waId === expert.waId) || row.expertId === expert.expertId) || expert;
+        }
+
+        function getExpertInContacts(expert) {
+            const waId = normalizeWaId(expert?.waId || '');
+            if (!waId) return null;
+            return contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
+        }
+
+        function getExpertByWaId(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return null;
+            return readExpertsFromStorage().find((row) => normalizeWaId(row?.waId || '') === normalizedWaId) || null;
+        }
+
+        function getExpertRatingDisplay(rawRating) {
+            const numeric = Math.max(0, Math.min(5, Number(rawRating || 0) || 0));
+            const filledStars = Math.round(numeric);
+            const stars = '★'.repeat(filledStars) + '☆'.repeat(Math.max(0, 5 - filledStars));
+            return {
+                value: numeric ? numeric.toFixed(numeric % 1 === 0 ? 0 : 1) : '0',
+                stars
+            };
+        }
+
+        function addExpertToContacts(expertId) {
+            const rows = readExpertsFromStorage();
+            const expert = rows.find((row) => String(row?.expertId || '') === String(expertId || ''));
+            if (!expert) {
+                alert('Expert not found.');
+                return;
+            }
+            const waId = normalizeWaId(expert.waId || '');
+            if (!waId) {
+                alert('This expert does not have a valid WhatsApp number for chat.');
+                return;
+            }
+            if (!Array.isArray(whatsappMessagesByContact[waId])) {
+                whatsappMessagesByContact[waId] = [];
+            }
+            upsertWhatsappContact({
+                waId,
+                profileName: expert.name,
+                tag: 'tutor'
+            }, false);
+            saveManualContact({
+                waId,
+                profileName: expert.name,
+                tag: 'tutor'
+            });
+            refreshContactOrder();
+            applyContactFilter();
+            renderExpertList();
+        }
+
+        function promptAddSkillToExpert(expertId) {
+            const rows = readExpertsFromStorage();
+            const index = rows.findIndex((row) => String(row?.expertId || '') === String(expertId || ''));
+            if (index < 0) {
+                alert('Expert not found.');
+                return;
+            }
+            const skill = (window.prompt('Add skill / expertise:', '') || '').trim();
+            if (!skill) return;
+            const existingSkills = normalizeExpertRecord(rows[index]).expertise;
+            if (!existingSkills.some((item) => item.toLowerCase() === skill.toLowerCase())) {
+                existingSkills.push(skill);
+            }
+            rows[index] = {
+                ...normalizeExpertRecord(rows[index]),
+                expertise: existingSkills,
+                updatedAt: new Date().toISOString()
+            };
+            saveExperts(rows);
+            renderExpertList();
+        }
+
+        function deleteExpert(expertId) {
+            const normalizedExpertId = String(expertId || '').trim();
+            if (!normalizedExpertId) return;
+            const rows = readExpertsFromStorage();
+            const existing = rows.find((row) => String(row?.expertId || '') === normalizedExpertId);
+            if (!existing) {
+                alert('Expert not found.');
+                return;
+            }
+            const confirmed = window.confirm(`Delete expert "${existing.name}" (${normalizedExpertId})?`);
+            if (!confirmed) return;
+
+            const nextRows = rows.filter((row) => String(row?.expertId || '') !== normalizedExpertId);
+            saveExperts(nextRows);
+            if (!nextRows.length) {
+                setExpertIdSequenceInStorage(1);
+            }
+
+            const waId = normalizeWaId(existing.waId || '');
+            if (waId) {
+                const contactItem = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
+                if (contactItem) {
+                    contactItem.dataset.expertId = '';
+                    contactItem.querySelector('.contact-expert-id-badge')?.remove();
+                }
+            }
+
+            renderExpertList();
+        }
+
+        function parseCsvLine(line) {
+            const values = [];
+            let current = '';
+            let insideQuotes = false;
+            for (let i = 0; i < line.length; i += 1) {
+                const char = line[i];
+                const next = line[i + 1];
+                if (char === '"' && insideQuotes && next === '"') {
+                    current += '"';
+                    i += 1;
+                    continue;
+                }
+                if (char === '"') {
+                    insideQuotes = !insideQuotes;
+                    continue;
+                }
+                if (char === ',' && !insideQuotes) {
+                    values.push(current);
+                    current = '';
+                    continue;
+                }
+                current += char;
+            }
+            values.push(current);
+            return values.map((value) => String(value || '').trim());
+        }
+
+        function parseExpertsCsv(text) {
+            const lines = String(text || '')
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter(Boolean);
+            if (lines.length < 2) return [];
+            const headers = parseCsvLine(lines[0]).map((header) => header.toLowerCase());
+            const findIndex = (aliases) => headers.findIndex((header) => aliases.includes(header));
+            const nameIndex = findIndex(['name', 'expert name']);
+            const waIndex = findIndex(['whatsapp', 'whatsapp number', 'phone', 'mobile', 'number']);
+            const skillIndex = findIndex(['skill', 'skills', 'expertise', 'skill/expertise', 'subject']);
+            const ratingIndex = findIndex(['rating', 'ratings']);
+            const educationIndex = findIndex(['education', 'qualification']);
+            if (nameIndex < 0) {
+                throw new Error('CSV must include a Name column.');
+            }
+            return lines.slice(1).map((line) => {
+                const cols = parseCsvLine(line);
+                return {
+                    name: cols[nameIndex] || '',
+                    waId: waIndex >= 0 ? cols[waIndex] || '' : '',
+                    expertise: skillIndex >= 0 ? cols[skillIndex] || '' : '',
+                    rating: ratingIndex >= 0 ? cols[ratingIndex] || '' : '',
+                    education: educationIndex >= 0 ? cols[educationIndex] || '' : ''
+                };
+            }).filter((row) => String(row.name || '').trim());
+        }
+
+        function handleExpertsImportText(text) {
+            const parsed = parseExpertsCsv(text);
+            if (!parsed.length) {
+                alert('No expert rows found in CSV.');
+                return;
+            }
+            parsed.forEach((row) => {
+                upsertExpert({
+                    name: row.name,
+                    waId: row.waId,
+                    expertise: row.expertise,
+                    rating: row.rating,
+                    education: row.education
+                });
+            });
+            renderExpertList();
+            alert(`${parsed.length} experts imported successfully.`);
+        }
+
+        function downloadExpertsExportCsv() {
+            const rows = readExpertsFromStorage()
+                .map((expert) => normalizeExpertRecord(expert))
+                .filter((expert) => expert.expertId && expert.name)
+                .sort((a, b) => String(a.expertId || '').localeCompare(String(b.expertId || '')));
+
+            if (!rows.length) {
+                alert('No experts available to export.');
+                return;
+            }
+
+            const header = ['Expert Name', 'Expert ID', 'Skill/Expertise', 'Ratings', 'Education', 'WhatsApp Number', 'Added To Contacts'];
+            const lines = [header.map(escapeCsvValue).join(',')];
+            rows.forEach((expert) => {
+                lines.push([
+                    expert.name,
+                    expert.expertId,
+                    expert.expertise.join(' | '),
+                    expert.rating,
+                    expert.education,
+                    expert.waId,
+                    getExpertInContacts(expert) ? 'Yes' : 'No'
+                ].map(escapeCsvValue).join(','));
+            });
+
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `unisolvex-experts-${toDateInputValue(new Date())}.csv`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function renderExpertList() {
+            if (!orderList || activeOrderTab !== 'expert') return;
+            const query = (orderSearch.value || '').trim().toLowerCase();
+            orderList.innerHTML = '';
+
+            const filteredExperts = readExpertsFromStorage().filter((expert) => {
+                const skills = normalizeExpertRecord(expert).expertise.join(' ').toLowerCase();
+                return !query
+                    || String(expert.name || '').toLowerCase().includes(query)
+                    || String(expert.expertId || '').toLowerCase().includes(query)
+                    || skills.includes(query);
+            });
+
+            if (!filteredExperts.length) {
+                orderList.innerHTML = '<div class="order-card p-4 rounded-lg border text-sm text-gray-500">No experts found. Import experts from the admin menu.</div>';
+                return;
+            }
+
+            filteredExperts
+                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                .forEach((expert) => {
+                    const normalized = normalizeExpertRecord(expert);
+                    const inContacts = Boolean(getExpertInContacts(normalized));
+                    const skills = normalized.expertise.length ? normalized.expertise.join(', ') : 'Not added';
+                    const rating = getExpertRatingDisplay(normalized.rating);
+                    const education = normalized.education || 'Not added';
+                    const canAddToContacts = Boolean(normalized.waId) && !inContacts;
+                    const initials = getContactInitials(normalized.name, normalized.expertId);
+
+                    const card = document.createElement('div');
+                    card.className = 'order-card expert-card p-3 rounded-lg border shadow-sm';
+                    card.dataset.expertId = normalized.expertId;
+                    card.innerHTML = `
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="expert-card-head min-w-0">
+                                <div class="expert-card-avatar" aria-hidden="true">${escapeHtml(initials)}</div>
+                                <div class="min-w-0">
+                                    <p class="order-detail-label text-[10px] font-bold uppercase px-2 py-0.5 rounded">Expert</p>
+                                    <h4 class="order-title mt-2 text-sm font-bold text-gray-800">${escapeHtml(normalized.name)}</h4>
+                                    <p class="text-[11px] text-gray-500 mt-1">Expert ID: <span class="font-semibold text-gray-700">${escapeHtml(normalized.expertId)}</span></p>
+                                </div>
+                            </div>
+                            <div class="expert-card-actions">
+                                <button type="button" class="expert-add-skill-btn" data-expert-id="${escapeHtml(normalized.expertId)}">Add Skill</button>
+                                <button type="button" class="expert-add-contact-btn ${canAddToContacts ? 'is-ready' : 'is-muted'}" data-expert-id="${escapeHtml(normalized.expertId)}" ${canAddToContacts ? '' : 'disabled'}>${inContacts ? 'Added to Contacts' : (normalized.waId ? 'Add to Contacts' : 'No WhatsApp')}</button>
+                                ${isAdminUser ? `<button type="button" class="expert-delete-btn" data-expert-id="${escapeHtml(normalized.expertId)}">Delete</button>` : ''}
+                            </div>
+                        </div>
+                        <div class="mt-3 grid grid-cols-1 gap-2 text-[12px] text-gray-600">
+                            <p><span class="font-semibold text-gray-700">Skill/Expertise:</span> ${escapeHtml(skills)}</p>
+                            <div class="expert-card-meta-row">
+                                <p class="expert-rating-pill"><span class="font-semibold">Rating:</span> <span class="expert-rating-stars" aria-label="Rated ${escapeHtml(rating.value)} out of 5">${escapeHtml(rating.stars)}</span> <span class="expert-rating-value">${escapeHtml(rating.value)}/5</span></p>
+                                <p class="expert-education-pill"><span class="font-semibold">Education:</span> ${escapeHtml(education)}</p>
+                            </div>
+                        </div>
+                    `;
+                    orderList.appendChild(card);
+                });
         }
 
         function restoreManualContactsFromStorage() {
@@ -1136,6 +1988,45 @@ lucide.createIcons();
             indicatorEl.innerHTML = '<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-black text-white text-[9px] leading-none">...</span><span>Partially Paid</span>';
         }
 
+        function syncOrderExpertPaymentIndicator(card) {
+            const payoutEl = card.querySelector('.order-expert-pay');
+            if (!payoutEl) return;
+
+            const line = payoutEl.closest('p');
+            if (!line) return;
+
+            let indicatorEl = line.querySelector('.order-expert-payment-indicator');
+            if (!indicatorEl) {
+                indicatorEl = document.createElement('span');
+                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
+                line.appendChild(indicatorEl);
+            }
+
+            const payoutAmount = parseAmountToNumber(payoutEl.textContent || '');
+            const manualStatus = String(card.dataset.expertPaymentStatus || 'pending').toLowerCase();
+
+            if (!payoutAmount) {
+                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
+                indicatorEl.textContent = '';
+                return;
+            }
+
+            if (manualStatus === 'complete') {
+                indicatorEl.className = 'order-expert-payment-indicator ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-600 text-white text-[10px] font-bold';
+                indicatorEl.innerHTML = '&#10003;';
+                return;
+            }
+
+            if (manualStatus === 'partial') {
+                indicatorEl.className = 'order-expert-payment-indicator ml-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-700';
+                indicatorEl.innerHTML = '<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-black text-white text-[9px] leading-none">...</span><span>Partially Paid</span>';
+                return;
+            }
+
+            indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
+            indicatorEl.textContent = '';
+        }
+
         function syncOrderServiceTag(card) {
             let titleRow = card.querySelector('.order-title-row');
             if (!titleRow) return;
@@ -1259,6 +2150,371 @@ lucide.createIcons();
             } catch (err) {
                 return [];
             }
+        }
+
+        function parseJsonArray(raw) {
+            if (!raw) return [];
+            try {
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (err) {
+                return [];
+            }
+        }
+
+        function getNotifiedExpertIds(card) {
+            return parseJsonArray(card?.dataset?.notifiedExperts || '[]')
+                .map((value) => String(value || '').trim())
+                .filter(Boolean);
+        }
+
+        function setNotifiedExpertIds(card, values) {
+            if (!card) return;
+            const unique = Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean)));
+            card.dataset.notifiedExperts = JSON.stringify(unique);
+        }
+
+        function normalizeInterestedExperts(raw) {
+            const values = Array.isArray(raw)
+                ? raw
+                : String(raw || '')
+                    .split(/[\n,]/)
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+            const unique = [];
+            values.forEach((value) => {
+                if (!value) return;
+                if (unique.some((item) => item.toLowerCase() === value.toLowerCase())) return;
+                unique.push(value);
+            });
+            return unique;
+        }
+
+        function updateOrderDetailsSummary(card) {
+            if (!card) return;
+            const setText = (id, value) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = String(value || '-').trim() || '-';
+            };
+            const orderId = (card.querySelector('.order-id')?.textContent || '').replace('#', '').trim() || '-';
+            const clientId = String(card.dataset.clientId || '').trim() || '-';
+            const serviceType = String(card.dataset.serviceType || '').trim() || card.querySelector('.order-title')?.textContent?.trim() || '-';
+            const actualDeadline = card.querySelector('.order-deadline')?.dataset.baseValue || card.querySelector('.order-deadline')?.textContent?.trim() || '-';
+            const expertDeadline = card.querySelector('.order-expert-deadline')?.dataset.baseValue || card.querySelector('.order-expert-deadline')?.textContent?.trim() || '-';
+            const expertPayment = `${String(card.dataset.expertPaymentStatus || 'pending').trim() || 'pending'} | ${String(card.dataset.expertPayout || 'INR 0').trim() || 'INR 0'}`;
+            setText('odSummaryOrderId', `#${orderId}`);
+            setText('odSummaryClientId', clientId);
+            setText('odSummaryService', serviceType);
+            setText('odSummaryActualDeadline', actualDeadline);
+            setText('odSummaryExpertDeadline', expertDeadline);
+            setText('odSummaryExpertPayment', expertPayment);
+        }
+
+        function parseOrderTransactions(raw) {
+            return parseJsonArray(raw).map((row) => ({
+                currency: String(row?.currency || 'INR').trim().toUpperCase() || 'INR',
+                amount: String(row?.amount || '').trim(),
+                transactionId: String(row?.transactionId || '').trim(),
+                createdAt: String(row?.createdAt || '').trim()
+            })).filter((row) => row.amount || row.transactionId);
+        }
+
+        function parseOrderAttachments(raw) {
+            return parseJsonArray(raw).map((row) => ({
+                name: String(row?.name || '').trim(),
+                url: String(row?.url || '').trim(),
+                addedAt: String(row?.addedAt || '').trim()
+            })).filter((row) => row.name || row.url);
+        }
+
+        function renderOrderTransactionHistory(items) {
+            if (!odTransactionHistory) return;
+            if (!items.length) {
+                odTransactionHistory.innerHTML = '<p class="task-empty-state">No transactions recorded yet.</p>';
+                return;
+            }
+            odTransactionHistory.innerHTML = items.map((item, index) => {
+                const dateText = formatDateTimeForCard(item.createdAt || '');
+                const amountText = [item.currency || 'INR', item.amount || '0'].filter(Boolean).join(' ');
+                return `
+                    <div class="task-meta-item">
+                        <div>
+                            <p class="task-meta-item-title">${escapeHtml(amountText)}</p>
+                            <p class="task-meta-item-subtitle">${escapeHtml(item.transactionId || 'No transaction ID')}</p>
+                        </div>
+                        <div class="task-meta-item-actions">
+                            <span class="task-meta-item-time">${escapeHtml(dateText || 'Just now')}</span>
+                            <button type="button" class="task-meta-remove-btn" data-remove-transaction-index="${index}">Remove</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderOrderAttachmentList(target, items, kind) {
+            if (!target) return;
+            if (!items.length) {
+                target.innerHTML = '<p class="task-empty-state">No items added yet.</p>';
+                return;
+            }
+            target.innerHTML = items.map((item, index) => {
+                const dateText = formatDateTimeForCard(item.addedAt || '');
+                const href = item.url ? `href="${escapeHtml(item.url)}"` : '';
+                return `
+                    <div class="task-meta-item">
+                        <div>
+                            <p class="task-meta-item-title">${escapeHtml(item.name || 'Untitled')}</p>
+                            <p class="task-meta-item-subtitle">${item.url ? `<a ${href} target="_blank" rel="noopener noreferrer" class="task-meta-link">${escapeHtml(item.url)}</a>` : 'No link added'}</p>
+                        </div>
+                        <div class="task-meta-item-actions">
+                            <span class="task-meta-item-time">${escapeHtml(dateText || 'Just now')}</span>
+                            <button type="button" class="task-meta-remove-btn" data-remove-attachment-kind="${escapeHtml(kind)}" data-remove-attachment-index="${index}">Remove</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function ensureOrderCardEnhancements(card) {
+            if (!card || card.classList.contains('expert-card')) return;
+            let sessionEl = card.querySelector('.order-session');
+            let commentEl = card.querySelector('.order-comment');
+            if (!sessionEl) {
+                sessionEl = document.createElement('p');
+                sessionEl.className = 'order-session hidden mt-1 text-[11px] text-gray-600';
+                commentEl = card.querySelector('.order-comment');
+                if (commentEl) {
+                    card.insertBefore(sessionEl, commentEl);
+                } else {
+                    card.appendChild(sessionEl);
+                }
+            }
+            card.querySelector('.order-task-meta-grid')?.remove();
+            card.querySelector('.order-attachment-summary')?.remove();
+
+            const detailsGrid = card.querySelector('.mt-1.grid');
+            const orderHeader = card.querySelector('.mb-2 .flex.items-center.gap-2');
+            if (orderHeader) {
+                let createdByTop = orderHeader.querySelector('.order-created-by-top');
+                if (!createdByTop) {
+                    createdByTop = document.createElement('span');
+                    createdByTop.className = 'order-created-by-top text-[10px] text-gray-500 font-medium';
+                    const orderIdEl = orderHeader.querySelector('.order-id');
+                    if (orderIdEl) {
+                        orderHeader.insertBefore(createdByTop, orderIdEl);
+                    } else {
+                        orderHeader.prepend(createdByTop);
+                    }
+                }
+                const currentBy = card.querySelector('.order-created-by')?.textContent?.trim() || card.dataset.createdBy || card.dataset.assignedTo || agentName;
+                createdByTop.textContent = `By - ${currentBy}`;
+
+                let notifyBtn = orderHeader.querySelector('.open-expert-notify-btn');
+                if (!notifyBtn) {
+                    notifyBtn = document.createElement('button');
+                    notifyBtn.type = 'button';
+                    notifyBtn.className = 'open-expert-notify-btn p-1 rounded';
+                    notifyBtn.title = 'Notify Experts';
+                    const orderIdEl = orderHeader.querySelector('.order-id');
+                    if (orderIdEl) {
+                        orderHeader.insertBefore(notifyBtn, orderIdEl.nextSibling);
+                    } else {
+                        orderHeader.appendChild(notifyBtn);
+                    }
+                }
+                syncOrderNotifyButton(card);
+            }
+
+            if (detailsGrid) {
+                const caText = card.querySelector('.order-amount')?.textContent?.trim() || 'TBD';
+                const cdRaw = card.querySelector('.order-deadline')?.dataset.baseValue || card.querySelector('.order-deadline')?.textContent?.trim() || '';
+                const edRaw = card.querySelector('.order-expert-deadline')?.dataset.baseValue || card.querySelector('.order-expert-deadline')?.textContent?.trim() || '';
+                const epText = card.querySelector('.order-expert-pay')?.textContent?.trim() || card.dataset.expertPayout || 'INR 0';
+                detailsGrid.className = 'mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600';
+                detailsGrid.innerHTML = `
+                    <p>C.A - <span class="order-amount font-semibold text-indigo-600">${escapeHtml(caText)}</span><span class="order-payment-indicator hidden ml-1"></span></p>
+                    <p>E.P - <span class="order-expert-pay font-semibold text-violet-700">${escapeHtml(epText || 'INR 0')}</span><span class="order-expert-payment-indicator hidden ml-1"></span></p>
+                    <p>C.D - <span class="order-deadline deadline-muted font-medium">${escapeHtml(cdRaw)}</span></p>
+                    <p>E.D - <span class="order-expert-deadline deadline-muted font-medium">${escapeHtml(edRaw)}</span></p>
+                `;
+                detailsGrid.querySelector('.order-deadline').dataset.baseValue = cdRaw;
+                detailsGrid.querySelector('.order-expert-deadline').dataset.baseValue = edRaw;
+            }
+        }
+
+        function syncOrderNotifyButton(card) {
+            if (!card) return;
+            const button = card.querySelector('.open-expert-notify-btn');
+            if (!button) return;
+            const isNotified = getNotifiedExpertIds(card).length > 0;
+            button.classList.toggle('is-notified', isNotified);
+            button.title = isNotified ? 'Experts notified' : 'Notify Experts';
+            button.innerHTML = isNotified
+                ? '<i data-lucide="bell-ring" class="w-3.5 h-3.5"></i>'
+                : '<i data-lucide="bell" class="w-3.5 h-3.5"></i>';
+            lucide.createIcons({ attrs: { 'stroke-width': 2 } });
+        }
+
+        function addTransactionToActiveCard() {
+            if (!activeOrderCard) return;
+            const amount = String(odTransactionAmountInput?.value || '').trim();
+            const transactionId = String(odTransactionIdInput?.value || '').trim();
+            const currency = String(odTransactionCurrencyInput?.value || 'INR').trim().toUpperCase() || 'INR';
+            if (!amount && !transactionId) {
+                alert('Add amount or transaction ID first.');
+                return;
+            }
+            const rows = parseOrderTransactions(activeOrderCard.dataset.expertTransactions || '[]');
+            rows.unshift({
+                currency,
+                amount,
+                transactionId,
+                createdAt: new Date().toISOString()
+            });
+            activeOrderCard.dataset.expertTransactions = JSON.stringify(rows);
+            renderOrderTransactionHistory(rows);
+            if (odTransactionAmountInput) odTransactionAmountInput.value = '';
+            if (odTransactionIdInput) odTransactionIdInput.value = '';
+            persistOrderListToStorage();
+        }
+
+        function removeTransactionFromActiveCard(index) {
+            if (!activeOrderCard) return;
+            const rows = parseOrderTransactions(activeOrderCard.dataset.expertTransactions || '[]')
+                .filter((_, rowIndex) => rowIndex !== index);
+            activeOrderCard.dataset.expertTransactions = JSON.stringify(rows);
+            renderOrderTransactionHistory(rows);
+            persistOrderListToStorage();
+        }
+
+        function addAttachmentToActiveCard(kind) {
+            if (!activeOrderCard) return;
+            const isQuestion = kind === 'question';
+            const nameInput = isQuestion ? odQuestionItemNameInput : odSolutionItemNameInput;
+            const urlInput = isQuestion ? odQuestionItemUrlInput : odSolutionItemUrlInput;
+            const target = isQuestion ? odQuestionAttachmentList : odSolutionAttachmentList;
+            const datasetKey = isQuestion ? 'questionAttachments' : 'solutionAttachments';
+            const name = String(nameInput?.value || '').trim();
+            const url = String(urlInput?.value || '').trim();
+            if (!name && !url) {
+                alert('Add file name or URL first.');
+                return;
+            }
+            const rows = parseOrderAttachments(activeOrderCard.dataset[datasetKey] || '[]');
+            rows.unshift({
+                name: name || url,
+                url,
+                addedAt: new Date().toISOString()
+            });
+            activeOrderCard.dataset[datasetKey] = JSON.stringify(rows);
+            renderOrderAttachmentList(target, rows, kind);
+            syncOrderExpertSummary(activeOrderCard);
+            if (nameInput) nameInput.value = '';
+            if (urlInput) urlInput.value = '';
+            persistOrderListToStorage();
+        }
+
+        function removeAttachmentFromActiveCard(kind, index) {
+            if (!activeOrderCard) return;
+            const isQuestion = kind === 'question';
+            const target = isQuestion ? odQuestionAttachmentList : odSolutionAttachmentList;
+            const datasetKey = isQuestion ? 'questionAttachments' : 'solutionAttachments';
+            const rows = parseOrderAttachments(activeOrderCard.dataset[datasetKey] || '[]')
+                .filter((_, rowIndex) => rowIndex !== index);
+            activeOrderCard.dataset[datasetKey] = JSON.stringify(rows);
+            renderOrderAttachmentList(target, rows, kind);
+            syncOrderExpertSummary(activeOrderCard);
+            persistOrderListToStorage();
+        }
+
+        function syncOrderExpertSummary(card) {
+            if (!card) return;
+            ensureOrderCardEnhancements(card);
+        }
+
+        function getFilteredExpertsForNotify(query) {
+            const normalizedQuery = String(query || '').trim().toLowerCase();
+            return readExpertsFromStorage()
+                .map((row) => normalizeExpertRecord(row))
+                .filter((expert) => expert.expertId && expert.name)
+                .filter((expert) => {
+                    if (!normalizedQuery) return true;
+                    const haystack = [
+                        expert.name,
+                        expert.expertId,
+                        expert.waId,
+                        ...(expert.expertise || [])
+                    ].join(' ').toLowerCase();
+                    return haystack.includes(normalizedQuery);
+                })
+                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        }
+
+        function renderExpertNotifyList() {
+            if (!expertNotifyList) return;
+            const rows = getFilteredExpertsForNotify(expertNotifySearch?.value || '');
+            if (!rows.length) {
+                expertNotifyList.innerHTML = '<div class="expert-notify-empty">No experts found for this search.</div>';
+                if (expertNotifySelectAll) expertNotifySelectAll.checked = false;
+                return;
+            }
+
+            expertNotifyList.innerHTML = rows.map((expert) => {
+                const skills = expert.expertise.length ? expert.expertise.join(', ') : 'No skills added';
+                const checked = selectedNotifyExpertIds.has(expert.expertId) ? 'checked' : '';
+                const initials = getContactInitials(expert.name, expert.expertId);
+                const rating = getExpertRatingDisplay(expert.rating || 0);
+                const alreadyNotified = activeNotifyOrderCard ? getNotifiedExpertIds(activeNotifyOrderCard).includes(expert.expertId) : false;
+                return `
+                    <label class="expert-notify-row">
+                        <div class="expert-notify-card-main">
+                            <div class="expert-notify-avatar-wrap">
+                                <div class="expert-notify-avatar" aria-hidden="true">${escapeHtml(initials)}</div>
+                                ${alreadyNotified ? '<span class="expert-notify-sent-tick" title="Already notified">&#10003;</span>' : ''}
+                            </div>
+                            <div class="expert-notify-meta">
+                                <div class="expert-notify-title-row">
+                                    <p class="expert-notify-name">${escapeHtml(expert.name)}</p>
+                                    <span class="expert-notify-pill">${escapeHtml(expert.expertId)}</span>
+                                </div>
+                                <p class="expert-notify-sub">${expert.waId ? escapeHtml(expert.waId) : 'WhatsApp not added'}</p>
+                                <p class="expert-notify-skills">${escapeHtml(skills)}</p>
+                                <div class="expert-notify-foot">
+                                    <span class="expert-notify-rating">${escapeHtml(rating.stars)} <strong>${escapeHtml(rating.value)}/5</strong></span>
+                                </div>
+                            </div>
+                        </div>
+                        <span class="expert-notify-check-wrap">
+                            <input type="checkbox" class="expert-notify-checkbox mt-1" data-expert-id="${escapeHtml(expert.expertId)}" ${checked}>
+                        </span>
+                    </label>
+                `;
+            }).join('');
+
+            const visibleIds = rows.map((expert) => expert.expertId);
+            if (expertNotifySelectAll) {
+                expertNotifySelectAll.checked = visibleIds.length > 0 && visibleIds.every((id) => selectedNotifyExpertIds.has(id));
+            }
+        }
+
+        function openExpertNotifyModal(card) {
+            activeNotifyOrderCard = card;
+            selectedNotifyExpertIds = new Set(getNotifiedExpertIds(card));
+            const taskTitle = card.querySelector('.order-title')?.textContent?.trim() || 'Untitled Task';
+            const orderId = (card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+            const serviceType = String(card.dataset.serviceType || '').trim();
+            if (expertNotifyTaskMeta) {
+                expertNotifyTaskMeta.textContent = `${taskTitle}${serviceType ? ` | ${serviceType}` : ''}${orderId ? ` | #${orderId}` : ''}`;
+            }
+            if (expertNotifySearch) expertNotifySearch.value = '';
+            renderExpertNotifyList();
+            expertNotifyModal?.classList.remove('hidden');
+        }
+
+        function closeExpertNotifyModal() {
+            expertNotifyModal?.classList.add('hidden');
+            activeNotifyOrderCard = null;
+            selectedNotifyExpertIds = new Set();
         }
 
         function formatFileSize(bytes) {
@@ -1508,6 +2764,7 @@ lucide.createIcons();
 
             const menuToggleBtn = item.querySelector('.contact-menu-toggle');
             const assignAgentBtn = item.querySelector('.contact-action-assign-agent');
+            const deleteContactBtn = item.querySelector('.contact-action-delete');
             const pinBtn = item.querySelector('.contact-action-pin');
             const readToggleBtn = item.querySelector('.contact-action-read');
             const archiveToggleBtn = item.querySelector('.contact-action-archive');
@@ -1550,6 +2807,24 @@ lucide.createIcons();
                         item.querySelector('.contact-card-menu')?.classList.add('hidden');
                     } catch (err) {
                         alert('Assign to agent failed: ' + (err?.message || 'Unknown error'));
+                    }
+                });
+            }
+
+            if (deleteContactBtn) {
+                deleteContactBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!isAdminUser) return;
+                    const waId = normalizeWaId(item.dataset.waId || '');
+                    if (!waId) return;
+                    const displayName = item.querySelector('.contact-name')?.textContent?.trim() || waId;
+                    const confirmed = window.confirm(`Delete contact "${displayName}" and its chat history?`);
+                    if (!confirmed) return;
+                    try {
+                        await deleteWhatsappContact(waId);
+                        removeContactFromUi(waId);
+                    } catch (err) {
+                        alert('Delete contact failed: ' + (err?.message || 'Unknown error'));
                     }
                 });
             }
@@ -2092,6 +3367,8 @@ lucide.createIcons();
             const nextSemester = String(contact.semester || savedContact?.semester || existing?.dataset.semester || '');
             const nextTimezone = String(contact.timezone || savedContact?.timezone || existing?.dataset.timezone || getAutoTimezone());
             const contactId = getOrCreateWhatsappContactId(normalizedWaId);
+            const linkedExpert = getExpertByWaId(normalizedWaId);
+            const expertId = String(linkedExpert?.expertId || '');
             saveManualContact({ waId: normalizedWaId, profileName, tag: nextTag, universityName: nextUniversityName, semester: nextSemester, timezone: nextTimezone });
             if (!existing) {
                 const item = document.createElement('div');
@@ -2106,6 +3383,7 @@ lucide.createIcons();
                 item.dataset.universityName = nextUniversityName;
                 item.dataset.semester = nextSemester;
                 item.dataset.timezone = nextTimezone;
+                item.dataset.expertId = expertId;
                 item.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : 'human');
                 item.innerHTML = `
                     <div class="contact-card-top">
@@ -2118,6 +3396,7 @@ lucide.createIcons();
                                 <span class="contact-name font-semibold text-gray-800 text-sm">${escapeHtml(displayName)}</span>
                                 <div class="contact-secondary-row">
                                     <p class="contact-meta text-xs text-gray-500">ID: ${escapeHtml(contactId)}</p>
+                                    ${expertId ? `<span class="contact-expert-id-badge" title="Expert ID">${escapeHtml(expertId)}</span>` : ''}
                                     <span class="contact-label-badge hidden"></span>
                                     <span class="contact-pin-icon hidden" aria-hidden="true">
                                         <svg viewBox="0 0 16 16"><path d="M10.3 1.2c1.4 0 2.5 1.1 2.5 2.5 0 .6-.2 1.1-.5 1.5L10.8 7v2.2l1.1 1.1c.2.2.2.6 0 .8s-.6.2-.8 0L10 10H8.4l-3.8 3.8c-.2.2-.6.2-.8 0s-.2-.6 0-.8L7.6 9.2V7.6L6.5 6.5c-.2-.2-.2-.6 0-.8s.6-.2.8 0l1.1 1.1h2.2l1.5-1.5c.4-.4.5-.9.5-1.5 0-.8-.7-1.5-1.5-1.5S9.6 3 9.6 3.8c0 .2-.1.4-.3.5l-1.5 1c-.3.2-.6.1-.8-.2s-.1-.6.2-.8l1.2-.8c.2-1.3 1.3-2.3 2.6-2.3Z"></path><circle cx="10.3" cy="3.8" r="0.8"></circle></svg>
@@ -2136,6 +3415,7 @@ lucide.createIcons();
                     </div>
                     <div class="contact-card-menu hidden">
                         <button type="button" class="contact-action-assign-agent">Assign to Agent</button>
+                        ${isAdminUser ? '<button type="button" class="contact-action-delete text-red-600">Delete Contact</button>' : ''}
                         <button type="button" class="contact-action-pin">Pin chat</button>
                         <label class="contact-menu-label-wrap">
                             <span>Label chat</span>
@@ -2167,11 +3447,27 @@ lucide.createIcons();
                 existing.dataset.universityName = nextUniversityName;
                 existing.dataset.semester = nextSemester;
                 existing.dataset.timezone = nextTimezone;
+                existing.dataset.expertId = expertId;
                 existing.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : existing.dataset.aiMode || 'human');
                 const metaEl = existing.querySelector('.contact-meta') || existing.querySelector('p');
                 if (metaEl) {
                     metaEl.classList.add('contact-meta');
                     metaEl.textContent = 'ID: ' + contactId;
+                }
+                let expertBadgeEl = existing.querySelector('.contact-expert-id-badge');
+                if (expertId) {
+                    if (!expertBadgeEl) {
+                        expertBadgeEl = document.createElement('span');
+                        expertBadgeEl.className = 'contact-expert-id-badge';
+                        existing.querySelector('.contact-secondary-row')?.insertBefore(
+                            expertBadgeEl,
+                            existing.querySelector('.contact-label-badge')
+                        );
+                    }
+                    expertBadgeEl.textContent = expertId;
+                    expertBadgeEl.title = 'Expert ID';
+                } else if (expertBadgeEl) {
+                    expertBadgeEl.remove();
                 }
             }
             const tagSelect = existing.querySelector('.contact-menu-label');
@@ -2451,6 +3747,7 @@ lucide.createIcons();
         });
 
         migrateWhatsappContactIdsToSixDigitSeries();
+        experts = readExpertsFromStorage();
         setActiveContactItem(null);
         updateTaskClientInputFromContact(null);
         updateAiAssistButtonState(null);
@@ -2490,6 +3787,95 @@ lucide.createIcons();
                 refreshContactOrder();
                 applyContactFilter();
             };
+        }
+
+        if (adminQuickMenuBtn && isAdminUser) {
+            adminQuickMenuBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const willOpen = adminQuickMenu?.classList.contains('hidden');
+                adminQuickMenu?.classList.toggle('hidden', !willOpen);
+                adminQuickMenuBtn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            });
+        }
+
+        if (navExportClientsBtn && isAdminUser) {
+            navExportClientsBtn.addEventListener('click', () => {
+                adminQuickMenu?.classList.add('hidden');
+                adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+                openExportClientsModal();
+            });
+        }
+
+        if (navExportExpertsBtn && isAdminUser) {
+            navExportExpertsBtn.addEventListener('click', () => {
+                adminQuickMenu?.classList.add('hidden');
+                adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+                downloadExpertsExportCsv();
+            });
+        }
+
+        if (navImportExpertsBtn && isAdminUser) {
+            navImportExpertsBtn.addEventListener('click', () => {
+                adminQuickMenu?.classList.add('hidden');
+                adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+                importExpertsFileInput?.click();
+            });
+        }
+
+        if (importExpertsFileInput) {
+            importExpertsFileInput.addEventListener('change', async (event) => {
+                const file = event.target?.files?.[0];
+                if (!file) return;
+                const fileName = String(file.name || '').toLowerCase();
+                if (!fileName.endsWith('.csv')) {
+                    alert('Please import a CSV file. In Excel, use Save As -> CSV UTF-8.');
+                    importExpertsFileInput.value = '';
+                    return;
+                }
+                try {
+                    const text = await file.text();
+                    handleExpertsImportText(text);
+                } catch (err) {
+                    alert('Import failed: ' + (err?.message || 'Unknown error'));
+                } finally {
+                    importExpertsFileInput.value = '';
+                }
+            });
+        }
+
+        if (closeExportClientsModalBtn) {
+            closeExportClientsModalBtn.addEventListener('click', () => {
+                closeExportClientsModal();
+            });
+        }
+
+        if (cancelExportClientsBtn) {
+            cancelExportClientsBtn.addEventListener('click', () => {
+                closeExportClientsModal();
+            });
+        }
+
+        if (confirmExportClientsBtn) {
+            confirmExportClientsBtn.addEventListener('click', () => {
+                const fromValue = exportClientsFromDateInput?.value || '';
+                const toValue = exportClientsToDateInput?.value || '';
+                const fromMs = parseDateInputStart(fromValue);
+                const toMs = parseDateInputEnd(toValue);
+
+                if (fromMs != null && toMs != null && fromMs > toMs) {
+                    alert('From date cannot be later than To date.');
+                    return;
+                }
+
+                const rows = buildClientExportRows(fromMs, toMs);
+                if (!rows.length) {
+                    alert('No client data found for the selected date range.');
+                    return;
+                }
+
+                downloadClientExportCsv(rows, fromValue, toValue);
+                closeExportClientsModal();
+            });
         }
 
         if (editClientDetailsBtn) {
@@ -2640,8 +4026,10 @@ lucide.createIcons();
             card.dataset.topic = '';
             card.dataset.activity = '';
             card.dataset.comments = '[]';
+            card.dataset.notifiedExperts = '[]';
             card.dataset.expertDeadline = '';
             card.dataset.expertPayout = 'INR 0';
+            card.dataset.expertPaymentStatus = 'pending';
             card.dataset.clientPaidCurrency = 'INR';
             card.dataset.clientPaidAmount = '';
             card.dataset.paymentStatusOverride = 'auto';
@@ -2651,7 +4039,11 @@ lucide.createIcons();
                 <div class="flex justify-between items-start mb-2">
                     <span class="order-detail-label text-[10px] font-bold uppercase px-2 py-0.5 rounded">Work Details</span>
                     <div class="flex items-center gap-2">
+                        <span class="order-created-by-top text-[10px] text-gray-500 font-medium">By - ${agentName}</span>
                         <span class="order-id text-[10px] text-gray-400 font-mono">#${orderId}</span>
+                        <button type="button" class="open-expert-notify-btn p-1 rounded" title="Notify Experts">
+                            <i data-lucide="bell" class="w-3.5 h-3.5"></i>
+                        </button>
                         <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
                             <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
                         </button>
@@ -2665,15 +4057,18 @@ lucide.createIcons();
                 <p class="order-client-note text-[11px] text-gray-500 mt-0.5">${clientText.replace(/\(\d+\)/, '').trim()}</p>
                 <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
                     <p>C.A - <span class="order-amount font-semibold text-indigo-600">TBD</span><span class="order-payment-indicator hidden ml-1"></span></p>
-                    <p>E.D - <span class="order-expert-deadline deadline-muted font-medium"></span></p>
+                    <p>E.P - <span class="order-expert-pay font-semibold text-violet-700">INR 0</span><span class="order-expert-payment-indicator hidden ml-1"></span></p>
                     <p>C.D - <span class="order-deadline deadline-muted font-medium"></span></p>
-                    <p>By - <span class="order-created-by text-gray-700 font-medium">${agentName}</span></p>
+                    <p>E.D - <span class="order-expert-deadline deadline-muted font-medium"></span></p>
                 </div>
                 <p class="order-session mt-1 text-[11px] text-gray-600 ${isLiveSession ? '' : 'hidden'}">S.T - ${sessionStart || 'TBD'} | Dur - ${sessionDuration || 'TBD'}m</p>
                 <p class="order-comment hidden mt-1 text-[11px] text-gray-700 border-t pt-1">Note: </p>
             `;
             syncOrderServiceTag(card);
             syncOrderPaymentIndicator(card);
+            syncOrderExpertPaymentIndicator(card);
+            syncOrderExpertSummary(card);
+            syncOrderNotifyButton(card);
             applyCardTypeStyle(card, serviceType);
             applyDeadlineStyles(card);
             applyOrderStatusStyle(card.querySelector('.order-status'), 'New');
@@ -2688,55 +4083,38 @@ lucide.createIcons();
             document.getElementById('taskModal').classList.add('hidden');
         };
         orderList.addEventListener('click', function(e) {
+            const addContactBtn = e.target.closest('.expert-add-contact-btn');
+            if (addContactBtn) {
+                addExpertToContacts(addContactBtn.dataset.expertId || '');
+                return;
+            }
+
+            const addSkillBtn = e.target.closest('.expert-add-skill-btn');
+            if (addSkillBtn) {
+                promptAddSkillToExpert(addSkillBtn.dataset.expertId || '');
+                return;
+            }
+
+            const deleteExpertBtn = e.target.closest('.expert-delete-btn');
+            if (deleteExpertBtn) {
+                deleteExpert(deleteExpertBtn.dataset.expertId || '');
+                return;
+            }
+
+            const notifyBtn = e.target.closest('.open-expert-notify-btn');
+            if (notifyBtn) {
+                const card = notifyBtn.closest('.order-card');
+                if (!card || card.classList.contains('expert-card')) return;
+                openExpertNotifyModal(card);
+                return;
+            }
+
             const btn = e.target.closest('.open-order-details-btn');
             if (!btn) return;
 
             const card = btn.closest('.order-card');
             if (!card) return;
-
-            activeOrderCard = card;
-
-            const title = card.querySelector('.order-title')?.textContent?.trim() || '';
-            const status = card.querySelector('.order-status')?.textContent?.trim() || 'In Progress';
-            const cardId = (card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
-            const detailsText = card.querySelector('.order-client-note')?.textContent?.trim() || '';
-            const clientIdText = card.dataset.clientId || cardId;
-            const amount = card.querySelector('.order-amount')?.textContent?.trim() || '';
-            const deadline = card.querySelector('.order-deadline')?.dataset.baseValue || card.querySelector('.order-deadline')?.textContent?.trim() || '';
-
-            document.getElementById('odTitle').value = title;
-            document.getElementById('odServiceType').value = card.dataset.serviceType || title;
-            document.getElementById('odStatus').value = status;
-            document.getElementById('odOrderId').value = cardId;
-            document.getElementById('odClientId').value = clientIdText;
-            document.getElementById('odAssignedTo').value = card.dataset.assignedTo || '';
-            document.getElementById('odCreatedBy').value = card.dataset.createdBy || card.dataset.assignedTo || '';
-            document.getElementById('odLabels').value = card.dataset.labels || '';
-            document.getElementById('odActualDeadline').value = toDateTimeLocalValue(deadline);
-            document.getElementById('odExpertDeadline').value = toDateTimeLocalValue(card.querySelector('.order-expert-deadline')?.dataset.baseValue || card.dataset.expertDeadline || '');
-            applyExpertDeadlineConstraint();
-            const amountMatch = amount.match(/^([A-Za-z]{3})\s+(.+)$/);
-            if (amountMatch) {
-                document.getElementById('odBaseCurrency').value = amountMatch[1].toUpperCase();
-                document.getElementById('odBaseAmountValue').value = amountMatch[2];
-            } else {
-                document.getElementById('odBaseCurrency').value = 'INR';
-                document.getElementById('odBaseAmountValue').value = amount === 'TBD' ? '' : amount;
-            }
-            const expertPayoutRaw = (card.dataset.expertPayout || '').replace(/^INR\s*/i, '').trim();
-            document.getElementById('odExpertPayout').value = expertPayoutRaw;
-            document.getElementById('odAdditionalCharges').value = card.dataset.additionalCharges || '';
-            document.getElementById('odClientPaidCurrency').value = card.dataset.clientPaidCurrency || 'INR';
-            document.getElementById('odClientPaidAmount').value = card.dataset.clientPaidAmount || '';
-            document.getElementById('odPaymentStatusOverride').value = card.dataset.paymentStatusOverride || 'auto';
-            document.getElementById('odDescription').value = card.dataset.description || '';
-            document.getElementById('odTopic').value = card.dataset.topic || '';
-            document.getElementById('odSessionStart').value = card.dataset.sessionStart || '';
-            document.getElementById('odSessionDuration').value = card.dataset.sessionDuration || '';
-            document.getElementById('odActivity').value = '';
-            renderCommentHistory(parseComments(card.dataset.comments || '[]'));
-
-            orderDetailsModal.classList.remove('hidden');
+            openOrderDetailsModal(card);
         });
 
         document.getElementById('saveCommentBtn').onclick = function() {
@@ -2754,9 +4132,10 @@ lucide.createIcons();
             const status = document.getElementById('odStatus').value.trim();
             if (status.toLowerCase() === 'archive') {
                 activeOrderCard.remove();
+                clearOrderDraft(activeOrderCard);
                 persistOrderListToStorage();
                 applyOrderSearchFilter();
-                orderDetailsModal.classList.add('hidden');
+                closeOrderDetailsModal();
                 activeOrderCard = null;
                 return;
             }
@@ -2782,6 +4161,7 @@ lucide.createIcons();
             const paymentStatusOverride = document.getElementById('odPaymentStatusOverride').value.trim() || 'auto';
             const description = document.getElementById('odDescription').value.trim();
             const topic = document.getElementById('odTopic').value.trim();
+            const expertPaymentStatus = (odExpertPaymentStatusInput?.value || 'pending').trim() || 'pending';
             const sessionStart = document.getElementById('odSessionStart').value.trim();
             const sessionDuration = document.getElementById('odSessionDuration').value.trim();
 
@@ -2793,10 +4173,16 @@ lucide.createIcons();
             noteEl.textContent = description || noteEl.textContent;
             activeOrderCard.querySelector('.order-id').textContent = '#' + (orderId || clientId || 'NEW');
             activeOrderCard.querySelector('.order-amount').textContent = baseAmount;
+            const expertPayEl = activeOrderCard.querySelector('.order-expert-pay');
+            if (expertPayEl) {
+                expertPayEl.textContent = expertPayout ? ('INR ' + expertPayout) : 'INR 0';
+            }
             activeOrderCard.dataset.clientPaidCurrency = clientPaidCurrency;
             activeOrderCard.dataset.clientPaidAmount = clientPaidAmount;
             activeOrderCard.dataset.paymentStatusOverride = paymentStatusOverride;
+            activeOrderCard.dataset.expertPaymentStatus = expertPaymentStatus;
             syncOrderPaymentIndicator(activeOrderCard);
+            syncOrderExpertPaymentIndicator(activeOrderCard);
             activeOrderCard.querySelector('.order-deadline').textContent = formatDateTimeForCard(actualDeadline || '');
             activeOrderCard.querySelector('.order-expert-deadline').textContent = formatDateTimeForCard(expertDeadline || '');
             activeOrderCard.querySelector('.order-deadline').dataset.baseValue = formatDateTimeForCard(actualDeadline || '');
@@ -2842,15 +4228,117 @@ lucide.createIcons();
             activeOrderCard.dataset.sessionDuration = sessionDuration;
             activeOrderCard.dataset.activity = activeOrderCard.dataset.activity || '';
             activeOrderCard.dataset.comments = JSON.stringify(comments);
+            syncOrderExpertSummary(activeOrderCard);
+            updateOrderDetailsSummary(activeOrderCard);
             document.getElementById('odActivity').value = '';
 
+            clearOrderDraft(activeOrderCard);
             persistOrderListToStorage();
-            orderDetailsModal.classList.add('hidden');
+            closeOrderDetailsModal();
         };
 
         document.getElementById('closeOrderDetailsBtn').onclick = function() {
-            orderDetailsModal.classList.add('hidden');
+            closeOrderDetailsModal();
         };
+        orderDetailsModal?.addEventListener('click', function(event) {
+            if (event.target !== orderDetailsModal) return;
+            closeOrderDetailsModal();
+        });
+        closeExpertNotifyModalBtn?.addEventListener('click', closeExpertNotifyModal);
+        cancelExpertNotifyBtn?.addEventListener('click', closeExpertNotifyModal);
+        expertNotifyModal?.addEventListener('click', function(event) {
+            if (event.target !== expertNotifyModal) return;
+            closeExpertNotifyModal();
+        });
+        expertNotifySearch?.addEventListener('input', renderExpertNotifyList);
+        expertNotifySelectAll?.addEventListener('change', function() {
+            const rows = getFilteredExpertsForNotify(expertNotifySearch?.value || '');
+            rows.forEach((expert) => {
+                if (this.checked) selectedNotifyExpertIds.add(expert.expertId);
+                else selectedNotifyExpertIds.delete(expert.expertId);
+            });
+            renderExpertNotifyList();
+        });
+        expertNotifyList?.addEventListener('change', function(event) {
+            const checkbox = event.target.closest('.expert-notify-checkbox');
+            if (!checkbox) return;
+            const expertId = String(checkbox.dataset.expertId || '').trim();
+            if (!expertId) return;
+            if (checkbox.checked) selectedNotifyExpertIds.add(expertId);
+            else selectedNotifyExpertIds.delete(expertId);
+            renderExpertNotifyList();
+        });
+        confirmExpertNotifyBtn?.addEventListener('click', function() {
+            if (!activeNotifyOrderCard) return;
+            const selectedIds = Array.from(selectedNotifyExpertIds);
+            if (!selectedIds.length) {
+                alert('Select at least one expert.');
+                return;
+            }
+            const expertsToNotify = readExpertsFromStorage()
+                .map((row) => normalizeExpertRecord(row))
+                .filter((expert) => selectedIds.includes(expert.expertId));
+            if (!expertsToNotify.length) {
+                alert('No valid experts found for notification.');
+                return;
+            }
+            const taskTitle = activeNotifyOrderCard.querySelector('.order-title')?.textContent?.trim() || 'Untitled Task';
+            const serviceType = String(activeNotifyOrderCard.dataset.serviceType || '').trim() || taskTitle;
+            const expertDeadline = activeNotifyOrderCard.querySelector('.order-expert-deadline')?.dataset.baseValue || activeNotifyOrderCard.querySelector('.order-expert-deadline')?.textContent?.trim() || 'TBD';
+            const expertPayout = String(activeNotifyOrderCard.dataset.expertPayout || activeNotifyOrderCard.querySelector('.order-expert-pay')?.textContent || 'TBD').trim() || 'TBD';
+
+            const originalText = confirmExpertNotifyBtn.textContent;
+            confirmExpertNotifyBtn.disabled = true;
+            confirmExpertNotifyBtn.textContent = 'Sending...';
+
+            whatsappFetch('/api/whatsapp/expert-notify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    taskTitle,
+                    serviceType,
+                    expertDeadline,
+                    expertPayout,
+                    experts: expertsToNotify.map((expert) => ({
+                        expertId: expert.expertId,
+                        name: expert.name,
+                        waId: expert.waId
+                    }))
+                })
+            })
+                .then(async (res) => {
+                    const data = await res.json();
+                    if (!res.ok || !data?.ok) {
+                        throw new Error(data?.error || 'Expert notification failed');
+                    }
+                    const successfulIds = Array.isArray(data.successes)
+                        ? data.successes.map((row) => String(row?.expertId || '').trim()).filter(Boolean)
+                        : selectedIds;
+                    const mergedIds = Array.from(new Set([...getNotifiedExpertIds(activeNotifyOrderCard), ...successfulIds]));
+                    setNotifiedExpertIds(activeNotifyOrderCard, mergedIds);
+                    syncOrderNotifyButton(activeNotifyOrderCard);
+                    persistOrderListToStorage();
+                    closeExpertNotifyModal();
+                    if (Array.isArray(data.failures) && data.failures.length) {
+                        alert(`Notified ${successfulIds.length} expert(s). ${data.failures.length} failed.`);
+                    }
+                })
+                .catch((error) => {
+                    alert('Expert notification failed: ' + (error?.message || 'Unknown error'));
+                })
+                .finally(() => {
+                    confirmExpertNotifyBtn.disabled = false;
+                    confirmExpertNotifyBtn.textContent = originalText;
+                });
+        });
+        ORDER_DETAILS_DRAFT_FIELD_IDS.forEach((id) => {
+            const field = document.getElementById(id);
+            if (!field) return;
+            field.addEventListener('input', saveActiveOrderDraft);
+            field.addEventListener('change', saveActiveOrderDraft);
+        });
         // Attach File Button
         document.getElementById('attachFileBtn').onclick = function() {
             if (!chatFileInput) return;
@@ -3122,7 +4610,6 @@ lucide.createIcons();
         sendBtn.onclick = async function() {
             const text = (chatInput?.value || '').trim();
             if (!text && pendingAttachments.length === 0) return;
-            if (whatsappSendInFlight) return;
             if (!activeWhatsappWaId) {
                 alert('Select a WhatsApp contact first.');
                 return;
@@ -3202,6 +4689,13 @@ lucide.createIcons();
                 item.classList.remove('is-menu-open');
                 item.querySelector('.contact-card-menu')?.classList.add('hidden');
             });
+        });
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('#adminQuickMenuWrap')) {
+                return;
+            }
+            adminQuickMenu?.classList.add('hidden');
+            adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
         });
         // Logout
         document.getElementById('logoutBtn').onclick = function() {

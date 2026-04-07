@@ -14,22 +14,28 @@
 <body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
 
     <!-- Navigation Bar -->
-    <nav class="animated-nav bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
-        <div class="nav-ambient" aria-hidden="true">
-            <span class="nav-shooting-star nav-shooting-star-one"></span>
-            <span class="nav-shooting-star nav-shooting-star-two"></span>
-            <span class="nav-shooting-star nav-shooting-star-three"></span>
-        </div>
+    <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
         <div class="brand-lockup flex items-center gap-3">
+            <div id="adminQuickMenuWrap" class="relative hidden">
+                <button id="adminQuickMenuBtn" type="button" class="admin-quick-menu-btn" title="Admin menu" aria-label="Admin menu" aria-expanded="false">
+                    <i data-lucide="menu" class="w-4 h-4"></i>
+                </button>
+                <div id="adminQuickMenu" class="admin-quick-menu hidden absolute left-0 top-[calc(100%+0.5rem)] z-40 min-w-[190px] p-1.5">
+                    <button id="navExportClientsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="sheet" class="w-4 h-4"></i>
+                        <span>Export Clients</span>
+                    </button>
+                    <button id="navExportExpertsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="files" class="w-4 h-4"></i>
+                        <span>Export Experts</span>
+                    </button>
+                    <button id="navImportExpertsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="file-up" class="w-4 h-4"></i>
+                        <span>Import Experts</span>
+                    </button>
+                </div>
+            </div>
             <div class="brand-mark">
-                <span class="brand-mark-glow"></span>
-                <span class="brand-runner" aria-hidden="true">
-                    <span class="brand-runner-track"></span>
-                    <span class="brand-runner-body">
-                        <span class="brand-runner-head"></span>
-                        <span class="brand-runner-tail"></span>
-                    </span>
-                </span>
                 <img src="/favicon.ico?v=2" alt="UniSolveX" class="brand-mark-icon">
             </div>
             <span class="brand-wordmark font-bold text-xl text-gray-800">UniSolveX <span class="brand-wordmark-accent text-indigo-600">CRM</span></span>
@@ -259,13 +265,99 @@
         </div>
     </div>
 
+    <div id="exportClientsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[420px] max-w-[94vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Export Clients</h3>
+                    <p class="text-xs text-gray-500">Download client data by activity date range.</p>
+                </div>
+                <button id="closeExportClientsModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label for="exportClientsFromDate" class="text-xs font-bold uppercase text-gray-500">From Date</label>
+                    <input id="exportClientsFromDate" type="date" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <div>
+                    <label for="exportClientsToDate" class="text-xs font-bold uppercase text-gray-500">To Date</label>
+                    <input id="exportClientsToDate" type="date" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <p class="text-xs text-gray-500">Filter uses client chat activity between the selected dates.</p>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button id="cancelExportClientsBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button id="confirmExportClientsBtn" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Download CSV</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="expertNotifyModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[680px] max-w-[96vw] max-h-[86vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Notify Experts</h3>
+                    <p id="expertNotifyTaskMeta" class="text-xs text-gray-500">Select experts to notify for this task.</p>
+                </div>
+                <button id="closeExpertNotifyModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-3 flex-1 min-h-0">
+                <div class="expert-notify-toolbar">
+                    <div class="expert-notify-search-wrap">
+                        <span class="expert-notify-search-icon">/</span>
+                        <input id="expertNotifySearch" type="text" class="flex-1 rounded-md border p-2 text-sm" placeholder="Search by subject, skill, name, or expert ID">
+                    </div>
+                    <label class="expert-notify-select-all inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input id="expertNotifySelectAll" type="checkbox">
+                        <span>Select All</span>
+                    </label>
+                </div>
+                <div id="expertNotifyList" class="expert-notify-list rounded-xl border bg-gray-50 p-2 overflow-y-auto"></div>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button id="cancelExpertNotifyBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                <button id="confirmExpertNotifyBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Notify Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <input id="importExpertsFileInput" type="file" accept=".csv,text/csv" class="hidden">
+
     <div id="orderDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-xl shadow-2xl w-[1050px] max-w-[96vw] h-[88vh] overflow-y-auto p-6">
+        <div id="orderDetailsDialog" class="bg-white rounded-xl shadow-2xl w-[1050px] max-w-[96vw] h-[88vh] p-6">
             <div class="sticky top-0 z-20 bg-white border-b pb-2 mb-3 flex justify-between items-center">
                 <h3 class="text-lg font-bold">Order Card Details</h3>
                 <button id="closeOrderDetailsBtn" class="text-sm px-2 py-1 rounded hover:bg-gray-100">Close</button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <div class="order-details-summary-panel mb-4">
+                <div class="order-details-summary-grid">
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Order</span>
+                        <span id="odSummaryOrderId" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Client</span>
+                        <span id="odSummaryClientId" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Service</span>
+                        <span id="odSummaryService" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Actual Deadline</span>
+                        <span id="odSummaryActualDeadline" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Expert Deadline</span>
+                        <span id="odSummaryExpertDeadline" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Expert Payment</span>
+                        <span id="odSummaryExpertPayment" class="order-details-summary-value">Pending</span>
+                    </div>
+                </div>
+            </div>
+            <div id="orderDetailsScrollArea" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 <div class="md:col-span-2 space-y-3">
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Work Details</label>
@@ -383,6 +475,14 @@
                             <label class="text-xs font-bold text-gray-500 uppercase">Topic</label>
                             <input id="odTopic" type="text" class="w-full mt-1 p-2 border rounded-md">
                         </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Payment Status</label>
+                            <select id="odExpertPaymentStatus" class="w-full mt-1 p-2 border rounded-md bg-white">
+                                <option value="pending">Pending</option>
+                                <option value="partial">Partially Done</option>
+                                <option value="complete">Fully Done</option>
+                            </select>
+                        </div>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500 uppercase">Activity / Comment</label>
@@ -402,13 +502,11 @@
                     <div class="bg-gray-50 border rounded-md p-3">
                         <p class="text-xs font-bold text-gray-500 uppercase">Quick Actions</p>
                         <ul class="mt-2 text-xs text-gray-600 space-y-1">
-                            <li>Agents</li>
-                            <li>Labels</li>
-                            <li>Checklist</li>
-                            <li>Actual Deadline</li>
-                            <li>Expert Deadline</li>
-                            <li>Attachment</li>
-                            <li>Order Payment</li>
+                            <li>Expert payment status</li>
+                            <li>Actual deadline</li>
+                            <li>Expert deadline</li>
+                            <li>Order payment</li>
+                            <li>Comments</li>
                         </ul>
                     </div>
                     <button id="saveOrderDetailsBtn" class="w-full py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Changes</button>

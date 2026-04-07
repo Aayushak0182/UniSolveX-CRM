@@ -15,6 +15,10 @@ const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME |
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
 const whatsappInitiationTemplatePreviewText = process.env.WHATSAPP_INIT_TEMPLATE_PREVIEW_TEXT || 'Hello 👋,\n\nThis is UniSolvex team. We would like to start a conversation with you.\n\nPlease reply to this message so we can talk.\n\nThank you!';
+const expertNotifyTemplateName = process.env.WHATSAPP_EXPERT_NOTIFY_TEMPLATE_NAME || '';
+const expertNotifyTemplateLanguage = process.env.WHATSAPP_EXPERT_NOTIFY_TEMPLATE_LANG || 'en_US';
+const expertNotifyTemplateParamOrder = process.env.WHATSAPP_EXPERT_NOTIFY_TEMPLATE_PARAM_ORDER;
+const expertNotifyTemplatePreviewText = process.env.WHATSAPP_EXPERT_NOTIFY_TEMPLATE_PREVIEW_TEXT || 'Hello {{expertName}},\n\nA new task is available from UniSolvex.\nTask: {{taskTitle}}\nService: {{serviceType}}\nExpert deadline: {{expertDeadline}}\nExpert payout: {{expertPayout}}\n\nPlease reply if you are available.';
 const firebaseServiceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const firebaseServiceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '';
 const firebaseStorageBucketName = process.env.FIREBASE_STORAGE_BUCKET || '';
@@ -24,17 +28,9 @@ const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
 const cloudinaryFolder = String(process.env.CLOUDINARY_FOLDER || 'unisolvex-crm').trim() || 'unisolvex-crm';
 const aiAgentEnabled = /^(1|true|yes|on)$/i.test(process.env.AI_AGENT_ENABLED || '');
-const aiChatProvider = String(process.env.AI_CHAT_PROVIDER || process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
-const aiChatModel = String(
-    process.env.AI_CHAT_MODEL
-    || (aiChatProvider === 'openai' ? (process.env.OPENAI_CHAT_MODEL || 'gpt-4.1-mini') : '')
-    || process.env.AI_AGENT_MODEL
-    || 'gemini-2.5-flash'
-).trim();
-const aiAttachmentProvider = String(process.env.AI_ATTACHMENT_PROVIDER || 'gemini').trim().toLowerCase();
-const aiAttachmentModel = String(process.env.AI_ATTACHMENT_MODEL || process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
-const geminiApiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
-const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+const aiAgentProvider = String(process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
+const aiAgentModel = String(process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
+const aiAgentApiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
 const aiAgentOnlyFirstTimeClients = !/^(0|false|no|off)$/i.test(process.env.AI_AGENT_ONLY_FIRST_TIME_CLIENTS || 'true');
 const aiAgentHumanQueueName = String(process.env.AI_AGENT_HUMAN_QUEUE_NAME || 'Human Agent').trim() || 'Human Agent';
 const aiAgentHandoffMessage = String(process.env.AI_AGENT_HANDOFF_MESSAGE || 'I am transferring you to a human agent for pricing and final quotation.').trim();
@@ -74,9 +70,11 @@ const aiReplyQueueByWaId = new Map();
 const crmState = {
     orderListHtml: '',
     manualContacts: [],
+    experts: [],
     whatsappContactIdMap: {},
     whatsappReadState: {},
     whatsappContactIdSequence: 100100,
+    expertIdSequence: 1,
     updatedAt: ''
 };
 
@@ -489,14 +487,39 @@ function normalizeCrmStatePayload(payload = {}) {
         )
         : crmState.whatsappReadState;
     const nextSequence = Number(payload.whatsappContactIdSequence);
+    const nextExpertSequence = Number(payload.expertIdSequence);
+    const nextExperts = Array.isArray(payload.experts)
+        ? payload.experts
+            .filter((row) => row && typeof row === 'object')
+            .map((row) => ({
+                expertId: String(row.expertId || '').trim(),
+                name: String(row.name || '').trim(),
+                expertise: Array.isArray(row.expertise)
+                    ? row.expertise.map((item) => String(item || '').trim()).filter(Boolean)
+                    : String(row.expertise || '')
+                        .split(/[|,]/)
+                        .map((item) => String(item || '').trim())
+                        .filter(Boolean),
+                rating: String(row.rating || '').trim(),
+                education: String(row.education || '').trim(),
+                waId: normalizeWaId(row.waId || ''),
+                createdAt: String(row.createdAt || ''),
+                updatedAt: String(row.updatedAt || '')
+            }))
+            .filter((row) => row.expertId && row.name)
+        : crmState.experts;
     return {
         orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
         manualContacts: nextManualContacts,
+        experts: nextExperts,
         whatsappContactIdMap: nextContactIdMap,
         whatsappReadState: nextReadState,
         whatsappContactIdSequence: Number.isFinite(nextSequence) && nextSequence > 0
             ? nextSequence
             : crmState.whatsappContactIdSequence,
+        expertIdSequence: Number.isFinite(nextExpertSequence) && nextExpertSequence > 0
+            ? nextExpertSequence
+            : crmState.expertIdSequence,
         updatedAt: new Date().toISOString()
     };
 }
@@ -513,9 +536,11 @@ async function loadPersistedCrmState() {
     const nextState = normalizeCrmStatePayload(data);
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
+    crmState.experts = nextState.experts;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
+    crmState.expertIdSequence = nextState.expertIdSequence;
     crmState.updatedAt = String(data.updatedAt || nextState.updatedAt);
     crmStateLoaded = true;
     return true;
@@ -539,9 +564,11 @@ async function persistCrmState(partialPayload = {}) {
     });
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
+    crmState.experts = nextState.experts;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
+    crmState.expertIdSequence = nextState.expertIdSequence;
     crmState.updatedAt = nextState.updatedAt;
     if (!initFirebasePersistence()) {
         warnMissingFirebasePersistenceOnce();
@@ -550,6 +577,63 @@ async function persistCrmState(partialPayload = {}) {
     await firebaseDb.collection('crm_meta').doc('ui_state').set(nextState, { merge: true });
     lastFirebaseWriteAt = new Date().toISOString();
     lastFirebaseWriteError = '';
+    return true;
+}
+
+async function deletePersistedWhatsappThread(waId) {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId || !initFirebasePersistence()) return false;
+
+    const threadSnapshot = await firebaseDb.collection('wa_messages').where('waId', '==', normalizedWaId).get();
+    const batch = firebaseDb.batch();
+    threadSnapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    batch.delete(firebaseDb.collection('wa_contacts').doc(normalizedWaId));
+    batch.delete(firebaseDb.collection('crm_ai_contacts').doc(normalizedWaId));
+    await batch.commit();
+    lastFirebaseWriteAt = new Date().toISOString();
+    lastFirebaseWriteError = '';
+    return true;
+}
+
+async function deleteWhatsappContactThread(waId) {
+    const normalizedWaId = normalizeWaId(waId);
+    if (!normalizedWaId) return false;
+
+    const thread = messagesByWaId.get(normalizedWaId) || [];
+    thread.forEach((message) => {
+        const messageId = String(message?.id || '').trim();
+        if (messageId) messageStatusById.delete(messageId);
+    });
+
+    messagesByWaId.delete(normalizedWaId);
+    contactsByWaId.delete(normalizedWaId);
+    aiStateByWaId.delete(normalizedWaId);
+    aiReplyQueueByWaId.delete(normalizedWaId);
+
+    crmState.manualContacts = (crmState.manualContacts || []).filter((row) => normalizeWaId(row?.waId || '') !== normalizedWaId);
+    if (crmState.whatsappContactIdMap && typeof crmState.whatsappContactIdMap === 'object') {
+        delete crmState.whatsappContactIdMap[normalizedWaId];
+    }
+    if (crmState.whatsappReadState && typeof crmState.whatsappReadState === 'object') {
+        delete crmState.whatsappReadState[normalizedWaId];
+    }
+    crmState.updatedAt = new Date().toISOString();
+
+    if (initFirebasePersistence()) {
+        await Promise.all([
+            persistCrmState({
+                manualContacts: crmState.manualContacts,
+                whatsappContactIdMap: crmState.whatsappContactIdMap,
+                whatsappReadState: crmState.whatsappReadState
+            }),
+            deletePersistedWhatsappThread(normalizedWaId)
+        ]);
+    }
+
+    broadcast({
+        type: 'whatsapp_contact_deleted',
+        payload: { waId: normalizedWaId }
+    });
     return true;
 }
 
@@ -636,18 +720,6 @@ function safeParseJsonObject(rawText) {
     }
 }
 
-function extractTextFromOpenAiResponse(data) {
-    if (typeof data?.output_text === 'string' && data.output_text.trim()) {
-        return data.output_text.trim();
-    }
-    const output = Array.isArray(data?.output) ? data.output : [];
-    return output
-        .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
-        .map((part) => String(part?.text || part?.output_text || ''))
-        .join('\n')
-        .trim();
-}
-
 function buildAttachmentSummaryText(summary) {
     if (!summary || typeof summary !== 'object') return '';
     const parts = [];
@@ -665,7 +737,7 @@ function buildAttachmentSummaryText(summary) {
 }
 
 async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentName, messageType }) {
-    if (aiAttachmentProvider !== 'gemini' || !geminiApiKey || !buffer?.length) return '';
+    if (!aiAgentApiKey || !buffer?.length) return '';
     if (buffer.length > aiAttachmentInlineMaxBytes) {
         return '';
     }
@@ -685,7 +757,7 @@ async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentNa
         `Attachment type: ${messageType || mimeType || 'unknown'}`
     ].join('\n');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAttachmentModel)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -717,60 +789,6 @@ async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentNa
     return buildAttachmentSummaryText(parsed);
 }
 
-async function generateGeminiAiDecision({ prompt }) {
-    if (!geminiApiKey) {
-        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for Gemini chat replies');
-    }
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiChatModel)}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            contents: [{
-                role: 'user',
-                parts: [{ text: prompt }]
-            }],
-            generationConfig: {
-                temperature: 0.5,
-                responseMimeType: 'application/json'
-            }
-        })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-        throw new Error(data?.error?.message || 'Gemini generateContent failed');
-    }
-    return safeParseJsonObject(extractTextFromGeminiResponse(data));
-}
-
-async function generateOpenAiAiDecision({ prompt }) {
-    if (!openAiApiKey) {
-        throw new Error('OPENAI_API_KEY is required for OpenAI chat replies');
-    }
-    const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${openAiApiKey}`
-        },
-        body: JSON.stringify({
-            model: aiChatModel,
-            input: prompt,
-            text: {
-                format: {
-                    type: 'json_object'
-                }
-            }
-        })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(data?.error?.message || 'OpenAI responses failed');
-    }
-    return safeParseJsonObject(extractTextFromOpenAiResponse(data));
-}
-
 function isPricingIntent(text) {
     const value = String(text || '').toLowerCase();
     if (!value) return false;
@@ -796,11 +814,11 @@ function buildAiConversationTranscript(waId, limit = 16) {
 }
 
 async function generateAiAgentDecision({ waId, profileName, latestMessageText, aiState }) {
-    if (aiChatProvider === 'gemini' && !geminiApiKey) {
-        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for Gemini chat replies');
+    if (!aiAgentApiKey) {
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is required for AI agent replies');
     }
-    if (aiChatProvider === 'openai' && !openAiApiKey) {
-        throw new Error('OPENAI_API_KEY is required for OpenAI chat replies');
+    if (aiAgentProvider !== 'gemini') {
+        throw new Error(`Unsupported AI agent provider "${aiAgentProvider}". Set AI_AGENT_PROVIDER=gemini.`);
     }
 
     const transcript = buildAiConversationTranscript(waId);
@@ -849,14 +867,27 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
         '{"shouldReply":true,"replyText":"...","handoffToHuman":false,"handoffReason":"","intent":"...","confidence":0.0}'
     ].filter(Boolean).join('\n');
 
-    let parsed = null;
-    if (aiChatProvider === 'openai') {
-        parsed = await generateOpenAiAiDecision({ prompt });
-    } else if (aiChatProvider === 'gemini') {
-        parsed = await generateGeminiAiDecision({ prompt });
-    } else {
-        throw new Error(`Unsupported AI chat provider "${aiChatProvider}". Use openai or gemini.`);
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiAgentModel)}:generateContent?key=${encodeURIComponent(aiAgentApiKey)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [{
+                role: 'user',
+                parts: [{ text: prompt }]
+            }],
+            generationConfig: {
+                temperature: 0.5,
+                responseMimeType: 'application/json'
+            }
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(data?.error?.message || 'Gemini generateContent failed');
     }
+    const parsed = safeParseJsonObject(extractTextFromGeminiResponse(data));
     if (!parsed || typeof parsed !== 'object') {
         throw new Error('AI agent returned invalid JSON response');
     }
@@ -1473,6 +1504,18 @@ function normalizeTemplateParamKey(value) {
     return '';
 }
 
+function normalizeExpertNotifyTemplateParamKey(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (!key || key === 'none') return '';
+    if (['expert', 'expertname', 'name'].includes(key)) return 'expertName';
+    if (['task', 'tasktitle', 'title'].includes(key)) return 'taskTitle';
+    if (['service', 'servicetype', 'type'].includes(key)) return 'serviceType';
+    if (['actualdeadline', 'clientdeadline', 'deadline', 'actual'].includes(key)) return 'actualDeadline';
+    if (['expertdeadline', 'ed'].includes(key)) return 'expertDeadline';
+    if (['expertpayout', 'payout', 'pay'].includes(key)) return 'expertPayout';
+    return '';
+}
+
 function buildTemplateComponentsFromValues(paramKeys, valuesByKey) {
     if (!Array.isArray(paramKeys) || !paramKeys.length) return [];
     return [{
@@ -1540,6 +1583,28 @@ function getInitiationTemplateLanguageAttempts() {
     return attempts;
 }
 
+function getTemplateLanguageAttempts(preferredCode) {
+    const configured = String(preferredCode || '').trim() || 'en_US';
+    const attempts = [];
+    const push = (code) => {
+        const value = String(code || '').trim();
+        if (!value || attempts.includes(value)) return;
+        attempts.push(value);
+    };
+
+    push(configured);
+    if (/^en(?:_|$)/i.test(configured)) {
+        push('en');
+        push('en_US');
+    }
+    if (/^[a-z]{2}_[A-Z]{2}$/.test(configured)) {
+        push(configured.split('_')[0]);
+    } else if (/^[a-z]{2}$/i.test(configured)) {
+        push(`${configured.toLowerCase()}_US`);
+    }
+    return attempts;
+}
+
 function renderInitiationTemplatePreview(contactName, agentName) {
     return String(whatsappInitiationTemplatePreviewText || '')
         .replace(/\{\{\s*contactName\s*\}\}/gi, String(contactName || '').trim() || 'there')
@@ -1547,6 +1612,144 @@ function renderInitiationTemplatePreview(contactName, agentName) {
         .replace(/\{\{\s*1\s*\}\}/g, String(contactName || '').trim() || 'there')
         .replace(/\{\{\s*2\s*\}\}/g, String(agentName || '').trim() || 'our team')
         .trim();
+}
+
+function buildExpertNotifyText({ expertName, taskTitle, serviceType, expertDeadline, expertPayout }) {
+    const lines = [
+        `Hello ${expertName || 'there'},`,
+        '',
+        'A new task is available from UniSolvex.',
+        `Task: ${taskTitle || 'Untitled Task'}`,
+        `Service: ${serviceType || 'General'}`,
+        `Expert deadline: ${expertDeadline || 'TBD'}`,
+        `Expert payout: ${expertPayout || 'TBD'}`,
+        '',
+        'Please reply if you are available.'
+    ];
+    return lines.join('\n').trim();
+}
+
+function renderExpertNotifyTemplatePreview(valuesByKey) {
+    return String(expertNotifyTemplatePreviewText || '')
+        .replace(/\{\{\s*expertName\s*\}\}/gi, String(valuesByKey.expertName || '').trim() || 'there')
+        .replace(/\{\{\s*taskTitle\s*\}\}/gi, String(valuesByKey.taskTitle || '').trim() || 'Untitled Task')
+        .replace(/\{\{\s*serviceType\s*\}\}/gi, String(valuesByKey.serviceType || '').trim() || 'General')
+        .replace(/\{\{\s*expertDeadline\s*\}\}/gi, String(valuesByKey.expertDeadline || '').trim() || 'TBD')
+        .replace(/\{\{\s*expertPayout\s*\}\}/gi, String(valuesByKey.expertPayout || '').trim() || 'TBD')
+        .replace(/\{\{\s*1\s*\}\}/g, String(valuesByKey.expertName || '').trim() || 'there')
+        .replace(/\{\{\s*2\s*\}\}/g, String(valuesByKey.taskTitle || '').trim() || 'Untitled Task')
+        .replace(/\{\{\s*3\s*\}\}/g, String(valuesByKey.serviceType || '').trim() || 'General')
+        .replace(/\{\{\s*4\s*\}\}/g, String(valuesByKey.expertDeadline || '').trim() || 'TBD')
+        .replace(/\{\{\s*5\s*\}\}/g, String(valuesByKey.expertPayout || '').trim() || 'TBD')
+        .trim();
+}
+
+function buildExpertNotifyTemplateAttempts(valuesByKey) {
+    const candidates = [
+        ['expertName', 'taskTitle', 'serviceType', 'expertDeadline', 'expertPayout'],
+        ['expertName', 'taskTitle', 'expertDeadline', 'expertPayout'],
+        ['expertName', 'taskTitle', 'serviceType'],
+        ['expertName', 'taskTitle'],
+        ['taskTitle'],
+        []
+    ];
+    if (typeof expertNotifyTemplateParamOrder === 'string') {
+        const configuredKeys = expertNotifyTemplateParamOrder
+            .split(',')
+            .map((item) => normalizeExpertNotifyTemplateParamKey(item))
+            .filter(Boolean);
+        candidates.unshift(configuredKeys);
+    }
+    const seen = new Set();
+    return candidates
+        .map((keys) => ({
+            label: keys.length ? keys.join(',') : 'none',
+            components: keys.length ? [{
+                type: 'body',
+                parameters: keys.map((key) => ({
+                    type: 'text',
+                    text: String(valuesByKey[key] || '').trim()
+                }))
+            }] : []
+        }))
+        .filter((attempt) => {
+            if (seen.has(attempt.label)) return false;
+            seen.add(attempt.label);
+            return true;
+        });
+}
+
+async function sendExpertNotifyMessage({ waId, expertName, taskTitle, serviceType, expertDeadline, expertPayout }) {
+    const normalizedWaId = normalizeWaId(waId);
+    const valuesByKey = {
+        expertName: String(expertName || '').trim() || 'there',
+        taskTitle: String(taskTitle || '').trim() || 'Untitled Task',
+        serviceType: String(serviceType || '').trim() || 'General',
+        expertDeadline: String(expertDeadline || '').trim() || 'TBD',
+        expertPayout: String(expertPayout || '').trim() || 'TBD'
+    };
+    const previewText = renderExpertNotifyTemplatePreview(valuesByKey) || buildExpertNotifyText(valuesByKey);
+
+    if (expertNotifyTemplateName) {
+        const attempts = buildExpertNotifyTemplateAttempts(valuesByKey);
+        const languageAttempts = getTemplateLanguageAttempts(expertNotifyTemplateLanguage);
+        let result = null;
+        let lastError = null;
+        let resolvedTemplateLanguage = expertNotifyTemplateLanguage;
+
+        for (const languageCode of languageAttempts) {
+            for (const attempt of attempts) {
+                try {
+                    result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+                        messaging_product: 'whatsapp',
+                        to: normalizedWaId,
+                        type: 'template',
+                        template: {
+                            name: expertNotifyTemplateName,
+                            language: { code: languageCode },
+                            ...(attempt.components.length ? { components: attempt.components } : {})
+                        }
+                    });
+                    resolvedTemplateLanguage = languageCode;
+                    lastError = null;
+                    break;
+                } catch (error) {
+                    lastError = error;
+                    const graphErrorCode = getGraphErrorCode(error);
+                    const languageMismatch = graphErrorCode === '132001' || /language/i.test(String(error?.message || ''));
+                    if (graphErrorCode !== '132000' && !languageMismatch) {
+                        break;
+                    }
+                }
+            }
+            if (result) break;
+        }
+
+        if (result) {
+            return {
+                ok: true,
+                result,
+                messageType: 'template',
+                previewText,
+                templateName: expertNotifyTemplateName,
+                templateLanguage: resolvedTemplateLanguage
+            };
+        }
+    }
+
+    const textResult = await sendWhatsappTextMessage({
+        waId: normalizedWaId,
+        text: buildExpertNotifyText(valuesByKey),
+        senderType: 'human',
+        route: 'expert-notify',
+        messageType: 'text'
+    });
+    return {
+        ok: true,
+        result: { messages: [{ id: textResult.id }] },
+        messageType: 'text',
+        previewText: buildExpertNotifyText(valuesByKey)
+    };
 }
 
 async function uploadWhatsappMedia({ fileName, mimeType, dataUrl }) {
@@ -1792,10 +1995,12 @@ app.get('/api/whatsapp/debug', (_req, res) => {
             loaded: crmStateLoaded,
             updatedAt: crmState.updatedAt,
             manualContacts: crmState.manualContacts.length,
+            experts: crmState.experts.length,
             hasOrderListHtml: Boolean(crmState.orderListHtml),
             contactIdMapSize: Object.keys(crmState.whatsappContactIdMap || {}).length,
             readStateSize: Object.keys(crmState.whatsappReadState || {}).length,
-            contactIdSequence: crmState.whatsappContactIdSequence
+            contactIdSequence: crmState.whatsappContactIdSequence,
+            expertIdSequence: crmState.expertIdSequence
         },
         aiAgent: {
             enabled: aiAgentEnabled,
@@ -1866,9 +2071,11 @@ app.get('/api/crm/state', async (_req, res) => {
         ok: true,
         orderListHtml: crmState.orderListHtml,
         manualContacts: crmState.manualContacts,
+        experts: crmState.experts,
         whatsappContactIdMap: crmState.whatsappContactIdMap,
         whatsappReadState: crmState.whatsappReadState,
         whatsappContactIdSequence: crmState.whatsappContactIdSequence,
+        expertIdSequence: crmState.expertIdSequence,
         updatedAt: crmState.updatedAt
     });
 });
@@ -1947,6 +2154,19 @@ app.post('/api/ai-agent/contact-mode', async (req, res) => {
     }
 });
 
+app.delete('/api/whatsapp/contact/:waId', async (req, res) => {
+    const waId = normalizeWaId(req.params?.waId || '');
+    if (!waId) {
+        return res.status(400).json({ ok: false, error: 'waId is required' });
+    }
+    try {
+        await deleteWhatsappContactThread(waId);
+        return res.json({ ok: true, waId });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to delete contact' });
+    }
+});
+
 app.post('/api/crm/state', async (req, res) => {
     try {
         await persistCrmState(req.body || {});
@@ -1954,9 +2174,11 @@ app.post('/api/crm/state', async (req, res) => {
             ok: true,
             orderListHtml: crmState.orderListHtml,
             manualContacts: crmState.manualContacts,
+            experts: crmState.experts,
             whatsappContactIdMap: crmState.whatsappContactIdMap,
             whatsappReadState: crmState.whatsappReadState,
             whatsappContactIdSequence: crmState.whatsappContactIdSequence,
+            expertIdSequence: crmState.expertIdSequence,
             updatedAt: crmState.updatedAt
         });
     } catch (error) {
@@ -2263,6 +2485,118 @@ app.post('/api/whatsapp/initiate-preview', (req, res) => {
         templateLanguage: whatsappInitiationTemplateLanguage,
         previewText: renderInitiationTemplatePreview(contactName, agentName)
     });
+});
+
+app.post('/api/whatsapp/expert-notify', async (req, res) => {
+    const taskTitle = String(req.body?.taskTitle || '').trim() || 'Untitled Task';
+    const serviceType = String(req.body?.serviceType || '').trim() || 'General';
+    const expertDeadline = String(req.body?.expertDeadline || '').trim() || 'TBD';
+    const expertPayout = String(req.body?.expertPayout || '').trim() || 'TBD';
+    const experts = Array.isArray(req.body?.experts) ? req.body.experts : [];
+
+    if (!experts.length) {
+        return res.status(400).json({ ok: false, error: 'experts is required' });
+    }
+
+    try {
+        ensureWhatsappConfig();
+        const successes = [];
+        const failures = [];
+
+        for (const rawExpert of experts) {
+            const waId = normalizeWaId(rawExpert?.waId || '');
+            const expertName = String(rawExpert?.name || '').trim() || waId;
+            const expertId = String(rawExpert?.expertId || '').trim();
+            if (!waId) {
+                failures.push({
+                    expertId,
+                    expertName,
+                    error: 'Valid WhatsApp number not found'
+                });
+                continue;
+            }
+
+            try {
+                pushApiEvent({
+                    at: new Date().toISOString(),
+                    route: 'expert-notify',
+                    waId,
+                    type: 'task-notify',
+                    expertId,
+                    taskTitle,
+                    serviceType
+                });
+
+                const notifyResult = await sendExpertNotifyMessage({
+                    waId,
+                    expertName,
+                    taskTitle,
+                    serviceType,
+                    expertDeadline,
+                    expertPayout
+                });
+
+                if (notifyResult.messageType === 'template') {
+                    const profileName = contactsByWaId.get(waId)?.profileName || expertName || waId;
+                    const timestamp = new Date().toISOString();
+                    const messageId = notifyResult.result?.messages?.[0]?.id || '';
+                    const contact = upsertContact(waId, profileName);
+                    const storedMessage = {
+                        id: messageId,
+                        direction: 'outgoing',
+                        senderType: 'human',
+                        text: notifyResult.previewText,
+                        timestamp,
+                        messageType: 'template',
+                        status: 'sent',
+                        statusTimestamp: timestamp
+                    };
+                    addMessage(waId, storedMessage);
+                    await persistContactSnapshot(contact);
+                    await persistMessageSnapshot(waId, storedMessage);
+                    broadcast({
+                        type: 'whatsapp_message',
+                        payload: {
+                            waId,
+                            profileName,
+                            id: messageId,
+                            direction: 'outgoing',
+                            senderType: 'human',
+                            text: notifyResult.previewText,
+                            timestamp,
+                            messageType: 'template',
+                            status: 'sent',
+                            statusTimestamp: timestamp
+                        }
+                    });
+                }
+
+                successes.push({
+                    expertId,
+                    expertName,
+                    waId,
+                    messageType: notifyResult.messageType
+                });
+            } catch (error) {
+                failures.push({
+                    expertId,
+                    expertName,
+                    waId,
+                    error: error?.message || 'Unexpected notify error'
+                });
+            }
+        }
+
+        return res.json({
+            ok: successes.length > 0,
+            sent: successes.length,
+            failed: failures.length,
+            successes,
+            failures
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Unexpected expert notify error' });
+    }
 });
 
 app.post('/api/whatsapp/forward', async (req, res) => {

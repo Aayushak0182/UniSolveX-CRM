@@ -131,11 +131,6 @@ AI_AGENT_BUSINESS_CONTEXT=Describe your company, services, process, and what the
 AI_AGENT_SERVICE_CATALOG=List your supported services, categories, and non-pricing guidance.
 AI_AGENT_MAX_REPLIES_PER_LEAD=12
 AI_AGENT_ALWAYS_ACTIVE_WA_IDS=919876543210
-AI_CHAT_PROVIDER=openai
-AI_CHAT_MODEL=gpt-4.1-mini
-OPENAI_API_KEY=your_openai_api_key
-AI_ATTACHMENT_PROVIDER=gemini
-AI_ATTACHMENT_MODEL=gemini-2.5-flash
 ```
 
 Useful debug endpoints:
