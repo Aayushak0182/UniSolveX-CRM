@@ -104,9 +104,12 @@
   </main>
   <script>
     const AUTH_SESSION_KEY='crmAuthSession',AUTH_TOKEN_KEY='crmAuthToken',AUTH_EMAIL_KEY='crmAuthEmail',AUTH_EMAIL_LINK_KEY='crmAuthEmailForLink';
+    const DEFAULT_API_BASE='https://unisolvex-crm-backend-ra02.onrender.com';
+    const API_BASE=window.location.hostname.includes('localhost')?'':DEFAULT_API_BASE;
     const shell=document.querySelector('.shell'),loginForm=document.getElementById('loginForm');
     const emailInput=document.getElementById('email'),passwordInput=document.getElementById('password'),loginBtn=document.getElementById('loginBtn'),sendLinkBtn=document.getElementById('sendLinkBtn'),resetPasswordBtn=document.getElementById('resetPasswordBtn'),togglePasswordBtn=document.getElementById('togglePasswordBtn'),authStatus=document.getElementById('authStatus'),authReadyLabel=document.getElementById('authReadyLabel');
     let auth=null;
+    function apiUrl(path){return `${API_BASE}${path}`}
     function setStatus(message,tone='info'){authStatus.textContent=message||'';authStatus.className='status show '+tone}
     function clearSession(){localStorage.removeItem(AUTH_SESSION_KEY);localStorage.removeItem(AUTH_TOKEN_KEY);localStorage.removeItem(AUTH_EMAIL_KEY);localStorage.removeItem('agentName');localStorage.removeItem('agentRole')}
     function setBusy(busy,label){[loginBtn,sendLinkBtn,resetPasswordBtn].forEach(btn=>btn.disabled=busy);if(label)authReadyLabel.textContent=label}
@@ -130,14 +133,14 @@
         reasons.push('hosting init unavailable');
       }catch(error){reasons.push(error?.message||'hosting init failed')}
       try{
-        const res=await fetch('/api/auth/firebase-config',{cache:'no-store'});
+        const res=await fetch(apiUrl('/api/auth/firebase-config'),{cache:'no-store'});
         const data=await res.json().catch(()=>({}));
         if(res.ok&&data?.ok&&data?.config)return data.config;
         reasons.push(data?.error||(`api config failed (${res.status})`));
       }catch(error){reasons.push(error?.message||'api config request failed')}
       throw new Error(reasons.join(' | ')||'Firebase login config is not ready');
     }
-    async function finalizeUser(user){const idToken=await user.getIdToken(true);const res=await fetch('/api/auth/firebase-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken})});const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.user)throw new Error(data?.error||'This email is not authorized for CRM access');const session={...data.user,loggedInAt:new Date().toISOString()};localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));localStorage.setItem(AUTH_TOKEN_KEY,idToken);localStorage.setItem(AUTH_EMAIL_KEY,session.email);localStorage.setItem('agentName',session.name);localStorage.setItem('agentRole',session.role);localStorage.removeItem(AUTH_EMAIL_LINK_KEY);playLoginTransition();setTimeout(()=>{window.location.href='index.html'},760)}
+    async function finalizeUser(user){const idToken=await user.getIdToken(true);const res=await fetch(apiUrl('/api/auth/firebase-session'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken})});const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.user)throw new Error(data?.error||'This email is not authorized for CRM access');const session={...data.user,loggedInAt:new Date().toISOString()};localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));localStorage.setItem(AUTH_TOKEN_KEY,idToken);localStorage.setItem(AUTH_EMAIL_KEY,session.email);localStorage.setItem('agentName',session.name);localStorage.setItem('agentRole',session.role);localStorage.removeItem(AUTH_EMAIL_LINK_KEY);playLoginTransition();setTimeout(()=>{window.location.href='index.html'},760)}
     async function completeEmailLink(){if(!auth||!auth.isSignInWithEmailLink(window.location.href))return false;let email=localStorage.getItem(AUTH_EMAIL_LINK_KEY)||localStorage.getItem(AUTH_EMAIL_KEY)||emailInput.value.trim();if(!email)email=window.prompt('Enter your email to complete the secure sign-in link:')||'';email=String(email||'').trim();if(!email){setStatus('Enter your email to complete the secure sign-in link.','error');return true}setBusy(true,'Completing secure sign-in...');setStatus('Verifying your secure sign-in link...','info');try{const cred=await auth.signInWithEmailLink(email,window.location.href);await finalizeUser(cred.user)}catch(error){clearSession();setStatus(error?.message||'Failed to complete secure sign-in link.','error')}finally{setBusy(false,'Ready')}return true}
     async function init(){try{const config=await fetchConfig();if(!firebase.apps.length)firebase.initializeApp(config);auth=firebase.auth();authReadyLabel.textContent='Ready';const handled=await completeEmailLink();if(handled)return;const existing=localStorage.getItem(AUTH_SESSION_KEY);if(existing)window.location.href='index.html'}catch(error){setStatus(error?.message||'Firebase login setup failed.','error');authReadyLabel.textContent='Setup failed'}}
     togglePasswordBtn.addEventListener('click',()=>{const next=passwordInput.type==='password'?'text':'password';passwordInput.type=next;togglePasswordBtn.textContent=next==='password'?'Show':'Hide'});
