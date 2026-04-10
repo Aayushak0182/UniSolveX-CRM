@@ -1,53 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UniSolveX CRM | Login</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background: #f3f4f6; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UniSolveX CRM | Secure Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+  <style>
+    body{margin:0;min-height:100vh;font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:radial-gradient(circle at top left,rgba(59,130,246,.16),transparent 28%),radial-gradient(circle at bottom right,rgba(14,165,233,.12),transparent 30%),linear-gradient(135deg,#edf4ff,#fffaf1);color:#0f172a;overflow:hidden}
+    .shell{min-height:100vh;display:grid;place-items:center;padding:18px;position:relative}
+    .shell::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(79,70,229,.08),transparent 36%,rgba(249,115,22,.08));pointer-events:none}
+    .login-card{width:min(960px,100%);display:grid;grid-template-columns:1.02fr .98fr;align-items:stretch;border-radius:30px;overflow:hidden;background:rgba(255,255,255,.88);border:1px solid rgba(148,163,184,.18);box-shadow:0 30px 90px rgba(15,23,42,.14);backdrop-filter:blur(18px);position:relative}
+    .visual{position:relative;padding:28px;background:linear-gradient(155deg,#3154ee,#4f46e5 48%,#2563eb);color:#fff;overflow:hidden;min-height:0}
+    .visual::before{content:"";position:absolute;inset:auto -12% -24% auto;width:270px;height:270px;border-radius:999px;background:radial-gradient(circle,rgba(125,211,252,.28),transparent 70%)}
+    .visual::after{content:"";position:absolute;inset:-18% auto auto -12%;width:200px;height:200px;border-radius:999px;background:radial-gradient(circle,rgba(255,255,255,.16),transparent 72%)}
+    .brand{display:inline-flex;align-items:center;gap:12px;padding:10px 14px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.16);position:relative;z-index:1}
+    .brand-logo{width:48px;height:48px;border-radius:16px;object-fit:cover;background:#fff;padding:5px;box-shadow:0 12px 24px rgba(15,23,42,.26)}
+    .brand-copy{display:flex;flex-direction:column;gap:2px}
+    .brand-copy strong{font-size:14px;letter-spacing:.01em}
+    .brand-copy span{font-size:11px;color:rgba(255,255,255,.78)}
+    .visual-copy{position:relative;z-index:1;margin-top:18px}
+    .visual-copy h1{margin:0;font-size:clamp(2rem,3vw,2.7rem);line-height:1.02;letter-spacing:-.05em}
+    .visual-copy p{margin:10px 0 0;max-width:420px;font-size:13px;line-height:1.7;color:rgba(255,255,255,.86)}
+    .visual-art{position:relative;z-index:1;margin-top:18px;border-radius:24px;padding:14px;background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.08));border:1px solid rgba(255,255,255,.18)}
+    .visual-art::after{content:"";position:absolute;inset:auto 18px 14px 18px;height:34px;border-radius:999px;background:radial-gradient(circle,rgba(15,23,42,.28),transparent 70%);filter:blur(16px)}
+    .visual-art img{position:relative;display:block;width:100%;max-height:260px;object-fit:contain;border-radius:18px}
+    .panel{padding:28px 28px 24px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(255,255,255,.9));display:flex;flex-direction:column;justify-content:center;min-height:0}
+    .eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#4f46e5}
+    .panel h2{margin:10px 0 6px;font-size:1.9rem;letter-spacing:-.04em}
+    .panel p{margin:0;color:#64748b;font-size:13px;line-height:1.7}
+    .form{display:grid;gap:12px;margin-top:18px;position:relative}
+    .form::before{content:"";position:absolute;inset:-14px;border-radius:24px;background:radial-gradient(circle at top,rgba(251,146,60,.16),transparent 52%),radial-gradient(circle at bottom right,rgba(79,70,229,.1),transparent 58%);opacity:0;transform:scale(.98);transition:.26s ease;pointer-events:none}
+    .form.is-burning::before{opacity:1;transform:scale(1)}
+    .label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#475569}
+    .wrap{position:relative}
+    .wrap::after{content:"";position:absolute;inset:2px;border-radius:16px;background:linear-gradient(90deg,rgba(251,146,60,.12),rgba(239,68,68,.08),rgba(79,70,229,.06));opacity:0;transition:.24s ease;pointer-events:none}
+    .wrap.is-burning::after{opacity:1;animation:inputBurn 1.25s linear infinite}
+    .input{width:100%;border:1px solid rgba(148,163,184,.24);background:rgba(248,250,252,.92);border-radius:18px;padding:14px 16px;font-size:15px;font-weight:600;color:#0f172a;outline:none;transition:.18s;position:relative;z-index:1}
+    .input:focus{border-color:rgba(79,70,229,.55);box-shadow:0 0 0 4px rgba(79,70,229,.1),0 0 28px rgba(249,115,22,.14)}
+    .toggle{position:absolute;top:50%;right:12px;transform:translateY(-50%);border:0;background:transparent;color:#64748b;font-size:12px;font-weight:700;cursor:pointer;z-index:2}
+    .status{display:none;min-height:44px;padding:11px 13px;border-radius:16px;font-size:13px;line-height:1.5}
+    .status.show{display:block}.status.info{background:rgba(59,130,246,.1);color:#1d4ed8}.status.success{background:rgba(16,185,129,.12);color:#047857}.status.error{background:rgba(239,68,68,.1);color:#b91c1c}
+    .actions{display:grid;gap:9px}
+    .btn{border:0;border-radius:18px;padding:14px 16px;cursor:pointer;font-weight:800;transition:.18s;position:relative;overflow:hidden}
+    .btn:disabled{opacity:.6;cursor:wait}
+    .btn-primary{background:linear-gradient(135deg,#4f46e5,#2563eb);color:#fff;box-shadow:0 18px 30px rgba(79,70,229,.22)}
+    .btn-primary::before{content:"";position:absolute;top:-20%;bottom:-20%;width:45%;left:120%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.42),transparent);transform:skewX(-24deg);transition:left .48s ease}
+    .btn-primary:hover::before{left:-35%}
+    .btn-primary.is-burning{animation:buttonIgnite .8s ease both}
+    .btn-secondary{background:linear-gradient(135deg,rgba(14,165,233,.12),rgba(79,70,229,.1));color:#1d4ed8;border:1px solid rgba(59,130,246,.16)}
+    .btn-ghost{background:transparent;color:#475569;padding:11px 14px}
+    .meta{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:12px;color:#64748b;flex-wrap:wrap}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:rgba(15,23,42,.04);color:#334155;font-size:11px;font-weight:700}
+    .shell.is-burning::before{content:"";position:fixed;inset:0;background:radial-gradient(circle at center,rgba(255,251,235,.16),rgba(249,115,22,.2),rgba(15,23,42,.88));z-index:10;animation:screenBurn .9s ease forwards;pointer-events:none}
+    .shell.is-burning .login-card{animation:frameBurn .9s ease forwards}
+    @keyframes inputBurn{0%{background-position:0% 50%;box-shadow:0 0 0 rgba(0,0,0,0)}50%{background-position:100% 50%;box-shadow:0 0 24px rgba(249,115,22,.18)}100%{background-position:0% 50%;box-shadow:0 0 0 rgba(0,0,0,0)}}
+    @keyframes buttonIgnite{0%{box-shadow:0 18px 30px rgba(79,70,229,.22)}50%{box-shadow:0 0 28px rgba(249,115,22,.52),0 0 52px rgba(239,68,68,.24)}100%{box-shadow:0 18px 30px rgba(79,70,229,.22)}}
+    @keyframes frameBurn{0%{transform:scale(1);filter:saturate(1) brightness(1)}50%{transform:scale(1.03);filter:saturate(1.18) brightness(1.08)}100%{transform:scale(.96);filter:brightness(.25) saturate(1.4);opacity:0}}
+    @keyframes screenBurn{0%{opacity:0}20%{opacity:.5}100%{opacity:1}}
+    @media (max-width:900px){body{overflow:auto}.shell{padding:14px}.login-card{grid-template-columns:1fr}.visual{padding:22px}.visual-art img{max-height:180px}.panel{padding:22px 20px 20px}}
+  </style>
 </head>
-<body class="flex items-center justify-center h-screen">
-    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-sm">
-        <h2 class="text-2xl font-bold text-center text-indigo-700 mb-6">UniSolveX CRM Login</h2>
-        <form id="loginForm" class="space-y-4">
-            <div>
-                <label class="block text-gray-700 text-sm font-bold mb-2">Username</label>
-                <input id="username" type="text" class="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
-            </div>
-            <div>
-                <label class="block text-gray-700 text-sm font-bold mb-2">Password</label>
-                <input id="password" type="password" class="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
-            </div>
-            <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded font-bold hover:bg-indigo-700 transition">Login</button>
+<body>
+  <main class="shell">
+    <section class="login-card">
+      <aside class="visual">
+        <div class="brand">
+          <img src="favicon.ico" alt="UniSolveX logo" class="brand-logo">
+          <span class="brand-copy">
+            <strong>UniSolveX CRM</strong>
+            <span>UniSolveX Auth Secured</span>
+          </span>
+        </div>
+        <div class="visual-copy">
+          <h1>Work login, reset, and secure access.</h1>
+          <p>Use your authorized work email to open the right workspace. Admin emails open admin tools, while agent emails stay in the agent panel only.</p>
+        </div>
+        <div class="visual-art">
+          <img src="Academic.png" alt="Academic illustration">
+        </div>
+      </aside>
+      <section class="panel">
+        <span class="eyebrow">UniSolveX CRM</span>
+        <h2>Welcome back</h2>
+        <p>Sign in with your authorized work email. If you prefer, send yourself a secure sign-in link.</p>
+        <form id="loginForm" class="form">
+          <div><label class="label" for="email">Work Email</label><div class="wrap"><input id="email" type="email" class="input" placeholder="name@company.com" autocomplete="email" required></div></div>
+          <div><label class="label" for="password">Password</label><div class="wrap"><input id="password" type="password" class="input" placeholder="Enter your password" autocomplete="current-password" required><button id="togglePasswordBtn" type="button" class="toggle">Show</button></div></div>
+          <div id="authStatus" class="status info"></div>
+          <div class="actions">
+            <button id="loginBtn" type="submit" class="btn btn-primary">Sign In Securely</button>
+            <button id="sendLinkBtn" type="button" class="btn btn-secondary">Send Secure Sign-In Link</button>
+            <button id="resetPasswordBtn" type="button" class="btn btn-ghost">Forgot password? Send reset email</button>
+          </div>
         </form>
-        <p id="loginError" class="text-red-500 text-sm mt-4 text-center hidden">Invalid username or password.</p>
-    </div>
-    <script>
-        const allowedUsers = {
-            Aayush: { password: '220416', role: 'agent' },
-            Reya: { password: '123456', role: 'agent' },
-            admin: { password: '220416', role: 'admin' }
-        };
-
-        document.getElementById('loginForm').onsubmit = function(e) {
-            e.preventDefault();
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value.trim();
-            const user = Object.prototype.hasOwnProperty.call(allowedUsers, username) ? allowedUsers[username] : null;
-            const isValidPassword = Boolean(user) && user.password === password;
-
-            if (isValidPassword) {
-                localStorage.setItem('agentName', username);
-                localStorage.setItem('agentRole', user.role);
-                window.location.href = 'index.html';
-                return;
-            }
-
-            document.getElementById('loginError').classList.remove('hidden');
-        };
-    </script>
+        <div class="meta">
+          <span class="pill">Admin and agent roles are verified after sign-in</span>
+          <span id="authReadyLabel">Connecting...</span>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script>
+    const AUTH_SESSION_KEY='crmAuthSession',AUTH_TOKEN_KEY='crmAuthToken',AUTH_EMAIL_KEY='crmAuthEmail',AUTH_EMAIL_LINK_KEY='crmAuthEmailForLink';
+    const shell=document.querySelector('.shell'),loginForm=document.getElementById('loginForm');
+    const emailInput=document.getElementById('email'),passwordInput=document.getElementById('password'),loginBtn=document.getElementById('loginBtn'),sendLinkBtn=document.getElementById('sendLinkBtn'),resetPasswordBtn=document.getElementById('resetPasswordBtn'),togglePasswordBtn=document.getElementById('togglePasswordBtn'),authStatus=document.getElementById('authStatus'),authReadyLabel=document.getElementById('authReadyLabel');
+    let auth=null;
+    function setStatus(message,tone='info'){authStatus.textContent=message||'';authStatus.className='status show '+tone}
+    function clearSession(){localStorage.removeItem(AUTH_SESSION_KEY);localStorage.removeItem(AUTH_TOKEN_KEY);localStorage.removeItem(AUTH_EMAIL_KEY);localStorage.removeItem('agentName');localStorage.removeItem('agentRole')}
+    function setBusy(busy,label){[loginBtn,sendLinkBtn,resetPasswordBtn].forEach(btn=>btn.disabled=busy);if(label)authReadyLabel.textContent=label}
+    function setTypingBurnState(active){document.querySelectorAll('.wrap').forEach(wrap=>wrap.classList.toggle('is-burning',active));loginForm.classList.toggle('is-burning',active)}
+    function playLoginTransition(){loginBtn.classList.add('is-burning');shell.classList.add('is-burning')}
+    async function fetchConfig(){const res=await fetch('/api/auth/firebase-config');const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.config)throw new Error(data?.error||'Firebase login config is not ready');return data.config}
+    async function finalizeUser(user){const idToken=await user.getIdToken(true);const res=await fetch('/api/auth/firebase-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken})});const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.user)throw new Error(data?.error||'This email is not authorized for CRM access');const session={...data.user,loggedInAt:new Date().toISOString()};localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));localStorage.setItem(AUTH_TOKEN_KEY,idToken);localStorage.setItem(AUTH_EMAIL_KEY,session.email);localStorage.setItem('agentName',session.name);localStorage.setItem('agentRole',session.role);localStorage.removeItem(AUTH_EMAIL_LINK_KEY);playLoginTransition();setTimeout(()=>{window.location.href='index.html'},760)}
+    async function completeEmailLink(){if(!auth||!auth.isSignInWithEmailLink(window.location.href))return false;let email=localStorage.getItem(AUTH_EMAIL_LINK_KEY)||localStorage.getItem(AUTH_EMAIL_KEY)||emailInput.value.trim();if(!email)email=window.prompt('Enter your email to complete the secure sign-in link:')||'';email=String(email||'').trim();if(!email){setStatus('Enter your email to complete the secure sign-in link.','error');return true}setBusy(true,'Completing secure sign-in...');setStatus('Verifying your secure sign-in link...','info');try{const cred=await auth.signInWithEmailLink(email,window.location.href);await finalizeUser(cred.user)}catch(error){clearSession();setStatus(error?.message||'Failed to complete secure sign-in link.','error')}finally{setBusy(false,'Ready')}return true}
+    async function init(){try{const config=await fetchConfig();if(!firebase.apps.length)firebase.initializeApp(config);auth=firebase.auth();authReadyLabel.textContent='Ready';const handled=await completeEmailLink();if(handled)return;const existing=localStorage.getItem(AUTH_SESSION_KEY);if(existing)window.location.href='index.html'}catch(error){setStatus(error?.message||'Firebase login setup failed.','error');authReadyLabel.textContent='Setup failed'}}
+    togglePasswordBtn.addEventListener('click',()=>{const next=passwordInput.type==='password'?'text':'password';passwordInput.type=next;togglePasswordBtn.textContent=next==='password'?'Show':'Hide'});
+    [emailInput,passwordInput].forEach(input=>{input.addEventListener('input',()=>setTypingBurnState(Boolean(emailInput.value.trim()||passwordInput.value.trim())));input.addEventListener('focus',()=>setTypingBurnState(true));input.addEventListener('blur',()=>setTypingBurnState(Boolean(emailInput.value.trim()||passwordInput.value.trim())));});
+    document.getElementById('loginForm').addEventListener('submit',async(e)=>{e.preventDefault();if(!auth){setStatus('Firebase login is still loading. Please wait a moment.','info');return}const email=emailInput.value.trim().toLowerCase(),password=passwordInput.value.trim();if(!email||!password){setStatus('Enter both email and password to continue.','error');return}setBusy(true,'Signing in...');setStatus('Checking your account securely...','info');try{const cred=await auth.signInWithEmailAndPassword(email,password);await finalizeUser(cred.user)}catch(error){clearSession();setStatus(error?.message||'Sign-in failed. Please verify your email and password.','error')}finally{setBusy(false,'Ready')}});
+    sendLinkBtn.addEventListener('click',async()=>{if(!auth){setStatus('Firebase login is still loading. Please wait a moment.','info');return}const email=emailInput.value.trim().toLowerCase();if(!email){setStatus('Enter your email first to receive a secure sign-in link.','error');return}setBusy(true,'Sending sign-in link...');try{await auth.sendSignInLinkToEmail(email,{url:`${window.location.origin}${window.location.pathname}`,handleCodeInApp:true});localStorage.setItem(AUTH_EMAIL_LINK_KEY,email);localStorage.setItem(AUTH_EMAIL_KEY,email);setStatus('Secure sign-in link sent. Open the email and click the link to continue.','success')}catch(error){setStatus(error?.message||'Could not send the secure sign-in link.','error')}finally{setBusy(false,'Ready')}});
+    resetPasswordBtn.addEventListener('click',async()=>{if(!auth){setStatus('Firebase login is still loading. Please wait a moment.','info');return}const email=emailInput.value.trim().toLowerCase();if(!email){setStatus('Enter your email first to receive a password reset link.','error');return}setBusy(true,'Sending reset email...');try{await auth.sendPasswordResetEmail(email);setStatus('Password reset email sent. Check your inbox and spam folder.','success')}catch(error){setStatus(error?.message||'Could not send password reset email.','error')}finally{setBusy(false,'Ready')}});
+    init();
+  </script>
 </body>
 </html>
