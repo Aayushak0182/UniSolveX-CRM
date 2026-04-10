@@ -112,7 +112,31 @@
     function setBusy(busy,label){[loginBtn,sendLinkBtn,resetPasswordBtn].forEach(btn=>btn.disabled=busy);if(label)authReadyLabel.textContent=label}
     function setTypingBurnState(active){document.querySelectorAll('.wrap').forEach(wrap=>wrap.classList.toggle('is-burning',active));loginForm.classList.toggle('is-burning',active)}
     function playLoginTransition(){loginBtn.classList.add('is-burning');shell.classList.add('is-burning')}
-    async function fetchConfig(){const res=await fetch('/api/auth/firebase-config');const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.config)throw new Error(data?.error||'Firebase login config is not ready');return data.config}
+    async function fetchConfig(){
+      const reasons=[];
+      try{
+        const initRes=await fetch('/__/firebase/init.json',{cache:'no-store'});
+        const initData=await initRes.json().catch(()=>null);
+        if(initRes.ok&&initData&&initData.apiKey&&initData.projectId&&initData.appId){
+          return {
+            apiKey:String(initData.apiKey||'').trim(),
+            authDomain:String(initData.authDomain||`${initData.projectId}.firebaseapp.com`).trim(),
+            projectId:String(initData.projectId||'').trim(),
+            appId:String(initData.appId||'').trim(),
+            messagingSenderId:String(initData.messagingSenderId||'').trim(),
+            storageBucket:String(initData.storageBucket||'').trim()
+          };
+        }
+        reasons.push('hosting init unavailable');
+      }catch(error){reasons.push(error?.message||'hosting init failed')}
+      try{
+        const res=await fetch('/api/auth/firebase-config',{cache:'no-store'});
+        const data=await res.json().catch(()=>({}));
+        if(res.ok&&data?.ok&&data?.config)return data.config;
+        reasons.push(data?.error||(`api config failed (${res.status})`));
+      }catch(error){reasons.push(error?.message||'api config request failed')}
+      throw new Error(reasons.join(' | ')||'Firebase login config is not ready');
+    }
     async function finalizeUser(user){const idToken=await user.getIdToken(true);const res=await fetch('/api/auth/firebase-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken})});const data=await res.json().catch(()=>({}));if(!res.ok||!data?.ok||!data?.user)throw new Error(data?.error||'This email is not authorized for CRM access');const session={...data.user,loggedInAt:new Date().toISOString()};localStorage.setItem(AUTH_SESSION_KEY,JSON.stringify(session));localStorage.setItem(AUTH_TOKEN_KEY,idToken);localStorage.setItem(AUTH_EMAIL_KEY,session.email);localStorage.setItem('agentName',session.name);localStorage.setItem('agentRole',session.role);localStorage.removeItem(AUTH_EMAIL_LINK_KEY);playLoginTransition();setTimeout(()=>{window.location.href='index.html'},760)}
     async function completeEmailLink(){if(!auth||!auth.isSignInWithEmailLink(window.location.href))return false;let email=localStorage.getItem(AUTH_EMAIL_LINK_KEY)||localStorage.getItem(AUTH_EMAIL_KEY)||emailInput.value.trim();if(!email)email=window.prompt('Enter your email to complete the secure sign-in link:')||'';email=String(email||'').trim();if(!email){setStatus('Enter your email to complete the secure sign-in link.','error');return true}setBusy(true,'Completing secure sign-in...');setStatus('Verifying your secure sign-in link...','info');try{const cred=await auth.signInWithEmailLink(email,window.location.href);await finalizeUser(cred.user)}catch(error){clearSession();setStatus(error?.message||'Failed to complete secure sign-in link.','error')}finally{setBusy(false,'Ready')}return true}
     async function init(){try{const config=await fetchConfig();if(!firebase.apps.length)firebase.initializeApp(config);auth=firebase.auth();authReadyLabel.textContent='Ready';const handled=await completeEmailLink();if(handled)return;const existing=localStorage.getItem(AUTH_SESSION_KEY);if(existing)window.location.href='index.html'}catch(error){setStatus(error?.message||'Firebase login setup failed.','error');authReadyLabel.textContent='Setup failed'}}
