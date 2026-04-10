@@ -22,6 +22,24 @@ const expertNotifyTemplatePreviewText = process.env.WHATSAPP_EXPERT_NOTIFY_TEMPL
 const firebaseServiceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const firebaseServiceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '';
 const firebaseStorageBucketName = process.env.FIREBASE_STORAGE_BUCKET || '';
+const firebaseWebApiKey = String(process.env.FIREBASE_WEB_API_KEY || '').trim();
+const firebaseWebAuthDomain = String(process.env.FIREBASE_WEB_AUTH_DOMAIN || '').trim();
+const firebaseWebProjectId = String(process.env.FIREBASE_WEB_PROJECT_ID || '').trim();
+const firebaseWebAppId = String(process.env.FIREBASE_WEB_APP_ID || '').trim();
+const firebaseWebMessagingSenderId = String(process.env.FIREBASE_WEB_MESSAGING_SENDER_ID || '').trim();
+const firebaseWebStorageBucket = String(process.env.FIREBASE_WEB_STORAGE_BUCKET || firebaseStorageBucketName || '').trim();
+const firebaseAuthAdminEmails = new Set(
+    String(process.env.FIREBASE_AUTH_ADMIN_EMAILS || '')
+        .split(',')
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+);
+const firebaseAuthAgentEmails = new Set(
+    String(process.env.FIREBASE_AUTH_AGENT_EMAILS || '')
+        .split(',')
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+);
 const whatsappMediaStoragePrefix = process.env.WHATSAPP_MEDIA_STORAGE_PREFIX || 'whatsapp-media';
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
@@ -132,6 +150,40 @@ function initFirebasePersistence() {
         firebasePersistenceInitError = error?.message || 'Firebase persistence init failed';
         return false;
     }
+}
+
+function getFirebaseWebConfig() {
+    return {
+        apiKey: firebaseWebApiKey,
+        authDomain: firebaseWebAuthDomain,
+        projectId: firebaseWebProjectId,
+        appId: firebaseWebAppId,
+        messagingSenderId: firebaseWebMessagingSenderId,
+        storageBucket: firebaseWebStorageBucket
+    };
+}
+
+function hasCompleteFirebaseWebConfig() {
+    const config = getFirebaseWebConfig();
+    return Boolean(config.apiKey && config.authDomain && config.projectId && config.appId);
+}
+
+function resolveFirebaseAuthRole(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) return '';
+    if (firebaseAuthAdminEmails.has(normalizedEmail)) return 'admin';
+    if (!firebaseAuthAgentEmails.size) return 'agent';
+    return firebaseAuthAgentEmails.has(normalizedEmail) ? 'agent' : '';
+}
+
+function deriveNameFromEmail(email, fallbackDisplayName) {
+    const displayName = String(fallbackDisplayName || '').trim();
+    if (displayName) return displayName;
+    const localPart = String(email || '').split('@')[0] || 'User';
+    return localPart
+        .replace(/[._-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+        .trim() || 'User';
 }
 
 function warnMissingFirebasePersistenceOnce() {
@@ -1807,6 +1859,60 @@ app.get('/health', async (_req, res) => {
         lastFirebaseWriteError,
         persistenceCheckError
     });
+});
+
+app.get('/api/auth/firebase-config', (_req, res) => {
+    if (!hasCompleteFirebaseWebConfig()) {
+        return res.status(500).json({
+            ok: false,
+            error: 'Firebase web auth config is incomplete on the backend'
+        });
+    }
+    res.json({
+        ok: true,
+        config: getFirebaseWebConfig()
+    });
+});
+
+app.post('/api/auth/firebase-session', async (req, res) => {
+    const idToken = String(req.body?.idToken || '').trim();
+    if (!idToken) {
+        return res.status(400).json({ ok: false, error: 'idToken is required' });
+    }
+    if (!initFirebasePersistence()) {
+        return res.status(500).json({
+            ok: false,
+            error: firebasePersistenceInitError || 'Firebase Admin is not configured on the backend'
+        });
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(idToken, true);
+        const email = String(decoded.email || '').trim().toLowerCase();
+        if (!email) {
+            return res.status(400).json({ ok: false, error: 'Authenticated user email not found' });
+        }
+        const role = resolveFirebaseAuthRole(email);
+        if (!role) {
+            return res.status(403).json({
+                ok: false,
+                error: 'This email is not authorized for CRM access'
+            });
+        }
+        res.json({
+            ok: true,
+            user: {
+                uid: String(decoded.uid || ''),
+                email,
+                role,
+                name: deriveNameFromEmail(email, decoded.name || '')
+            }
+        });
+    } catch (error) {
+        res.status(401).json({
+            ok: false,
+            error: error?.message || 'Invalid Firebase session'
+        });
+    }
 });
 
 app.get('/webhook', (req, res) => {

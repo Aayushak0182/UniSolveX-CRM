@@ -1,7 +1,22 @@
 lucide.createIcons();
+        const storedAuthSessionRaw = localStorage.getItem('crmAuthSession');
+        let storedAuthSession = null;
+        try {
+            storedAuthSession = storedAuthSessionRaw ? JSON.parse(storedAuthSessionRaw) : null;
+        } catch {
+            storedAuthSession = null;
+        }
         // Show agent name from localStorage
-        const storedAgentName = localStorage.getItem('agentName');
-        const storedAgentRole = localStorage.getItem('agentRole') || 'agent';
+        const hasValidAuthSession = Boolean(
+            storedAuthSession
+            && typeof storedAuthSession === 'object'
+            && String(storedAuthSession?.email || '').trim()
+            && String(storedAuthSession?.name || '').trim()
+            && ['admin', 'agent'].includes(String(storedAuthSession?.role || '').trim())
+        );
+        const storedAgentName = String(hasValidAuthSession ? storedAuthSession?.name : '').trim();
+        const storedAgentRole = String(hasValidAuthSession ? storedAuthSession?.role : 'agent').trim() || 'agent';
+        const storedAgentEmail = String(hasValidAuthSession ? storedAuthSession?.email : '').trim().toLowerCase();
         const isAdminUser = storedAgentRole === 'admin';
         const adminQuickMenuWrap = document.getElementById('adminQuickMenuWrap');
         const adminQuickMenuBtn = document.getElementById('adminQuickMenuBtn');
@@ -9,18 +24,26 @@ lucide.createIcons();
         const navExportClientsBtn = document.getElementById('navExportClientsBtn');
         const navExportExpertsBtn = document.getElementById('navExportExpertsBtn');
         const navImportExpertsBtn = document.getElementById('navImportExpertsBtn');
+        const navMonthlyDataBtn = document.getElementById('navMonthlyDataBtn');
         const importExpertsFileInput = document.getElementById('importExpertsFileInput');
-        if (!storedAgentName) {
+        if (!hasValidAuthSession || !storedAgentName) {
+            localStorage.removeItem('crmAuthSession');
+            localStorage.removeItem('crmAuthToken');
+            localStorage.removeItem('crmAuthEmail');
+            localStorage.removeItem('agentName');
+            localStorage.removeItem('agentRole');
             window.location.href = 'login.html';
         }
         const adminServerStatusPanel = document.getElementById('adminServerStatusPanel');
         const agentName = storedAgentName || 'Aayush';
+        const agentEmail = storedAgentEmail;
         if (adminServerStatusPanel && storedAgentRole !== 'admin') {
             adminServerStatusPanel.classList.add('hidden');
         }
         document.getElementById('agentNameDisplay').textContent = (storedAgentRole === 'admin' ? 'Admin: ' : 'Agent: ') + agentName;
         document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
         const themeToggleBtn = document.getElementById('themeToggleBtn');
+        const assignActiveChatAgentBtn = document.getElementById('assignActiveChatAgentBtn');
         const themeIconSun = document.getElementById('themeIconSun');
         const themeIconMoon = document.getElementById('themeIconMoon');
         const whatsappStatusEl = document.getElementById('whatsappStatus');
@@ -38,9 +61,13 @@ lucide.createIcons();
         const orderList = document.getElementById('orderList');
         const orderSearch = document.getElementById('orderSearch');
         const orderDeliveryWindow = document.getElementById('orderDeliveryWindow');
+        const orderSearchRow = document.getElementById('orderSearchRow');
+        const monthlyDataControls = document.getElementById('monthlyDataControls');
+        const monthlyDataMonthInput = document.getElementById('monthlyDataMonth');
         const orderTabMine = document.getElementById('orderTabMine');
         const orderTabExpert = document.getElementById('orderTabExpert');
         const orderTabAll = document.getElementById('orderTabAll');
+        const orderTabMonthly = document.getElementById('orderTabMonthly');
         const orderDetailsModal = document.getElementById('orderDetailsModal');
         const clientDetailsModal = document.getElementById('clientDetailsModal');
         const exportClientsModal = document.getElementById('exportClientsModal');
@@ -50,6 +77,10 @@ lucide.createIcons();
         const cancelExportClientsBtn = document.getElementById('cancelExportClientsBtn');
         const confirmExportClientsBtn = document.getElementById('confirmExportClientsBtn');
         const expertNotifyModal = document.getElementById('expertNotifyModal');
+        const monthlyDataModal = document.getElementById('monthlyDataModal');
+        const closeMonthlyDataModalBtn = document.getElementById('closeMonthlyDataModalBtn');
+        const monthlyDataMonthModalInput = document.getElementById('monthlyDataMonthModal');
+        const monthlyDataModalContent = document.getElementById('monthlyDataModalContent');
         const closeExpertNotifyModalBtn = document.getElementById('closeExpertNotifyModalBtn');
         const cancelExpertNotifyBtn = document.getElementById('cancelExpertNotifyBtn');
         const confirmExpertNotifyBtn = document.getElementById('confirmExpertNotifyBtn');
@@ -59,6 +90,10 @@ lucide.createIcons();
         const expertNotifyList = document.getElementById('expertNotifyList');
         if (adminQuickMenuWrap && isAdminUser) {
             adminQuickMenuWrap.classList.remove('hidden');
+        }
+        if (!isAdminUser) {
+            orderTabMonthly?.classList.add('hidden');
+            monthlyDataControls?.classList.add('hidden');
         }
         const taskServiceType = document.getElementById('taskServiceType');
         const taskClientInput = document.getElementById('taskClientInput');
@@ -95,6 +130,7 @@ lucide.createIcons();
         const cancelForwardBtn = document.getElementById('cancelForwardBtn');
         const confirmForwardBtn = document.getElementById('confirmForwardBtn');
         const chatAiModeHintEl = document.getElementById('chatAiModeHint');
+        const chatAssignmentHintEl = document.getElementById('chatAssignmentHint');
         const notifyBtn = document.getElementById('notifyBtn');
         const sendBtn = document.getElementById('sendBtn');
         const attachFileBtn = document.getElementById('attachFileBtn');
@@ -116,6 +152,7 @@ lucide.createIcons();
         const CONTACT_PANEL_WIDE_STORAGE_KEY = 'unisolvex_contact_panel_wide_v1';
         const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
         const configuredWhatsappApiBase = localStorage.getItem(WHATSAPP_API_BASE_STORAGE_KEY);
+        const initialViewMode = new URLSearchParams(window.location.search).get('view');
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
@@ -447,6 +484,7 @@ lucide.createIcons();
                 delete orderSequenceByClient[key];
             });
             Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
+                ensureOrderAnalyticsMeta(card);
                 syncOrderServiceTag(card);
                 syncOrderPaymentIndicator(card);
                 syncOrderExpertPaymentIndicator(card);
@@ -547,6 +585,290 @@ lucide.createIcons();
             return d;
         }
 
+        function getDefaultMonthlyDataMonth() {
+            const now = new Date();
+            return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+
+        function formatDashboardNumber(value) {
+            const numeric = Number(value || 0);
+            return new Intl.NumberFormat('en-IN', {
+                maximumFractionDigits: 0
+            }).format(Number.isFinite(numeric) ? numeric : 0);
+        }
+
+        function formatDashboardCurrency(value) {
+            return `INR ${formatDashboardNumber(value)}`;
+        }
+
+        function getNormalizedOrderStatus(card) {
+            const raw = String(
+                card?.dataset?.orderStatus
+                || card?.querySelector('.order-status')?.textContent
+                || ''
+            ).trim().toLowerCase();
+            if (raw === 'inprogress') return 'in progress';
+            if (raw === 'cancel') return 'cancelled';
+            return raw || 'new';
+        }
+
+        function ensureOrderAnalyticsMeta(card) {
+            if (!card || !card.classList.contains('order-card') || card.classList.contains('expert-card')) return;
+            const nowIso = new Date().toISOString();
+            const fallbackDate =
+                card.dataset.updatedAt
+                || card.dataset.createdAt
+                || card.querySelector('.order-deadline')?.dataset.baseValue
+                || card.querySelector('.order-expert-deadline')?.dataset.baseValue
+                || nowIso;
+            if (!card.dataset.createdAt) {
+                const parsed = parseCardDateTime(fallbackDate);
+                card.dataset.createdAt = parsed ? parsed.toISOString() : nowIso;
+            }
+            if (!card.dataset.updatedAt) {
+                card.dataset.updatedAt = card.dataset.createdAt || nowIso;
+            }
+        }
+
+        function getOrderAnalyticsDate(card) {
+            ensureOrderAnalyticsMeta(card);
+            const candidates = [
+                card?.dataset?.updatedAt,
+                card?.dataset?.createdAt,
+                card?.querySelector('.order-deadline')?.dataset.baseValue,
+                card?.querySelector('.order-expert-deadline')?.dataset.baseValue
+            ];
+            for (const candidate of candidates) {
+                const parsed = parseCardDateTime(candidate) || new Date(candidate || '');
+                if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) {
+                    return parsed;
+                }
+            }
+            return null;
+        }
+
+        function getStoredOrderCardsSnapshot() {
+            const html = localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '';
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            return Array.from(temp.querySelectorAll('.order-card')).filter((card) => !card.classList.contains('expert-card'));
+        }
+
+        function renderMonthlyMetricCard(label, value, tone, helper) {
+            return `
+                <article class="monthly-metric-card tone-${tone}">
+                    <p class="monthly-metric-label">${escapeHtml(label)}</p>
+                    <p class="monthly-metric-value">${escapeHtml(value)}</p>
+                    <p class="monthly-metric-helper">${escapeHtml(helper)}</p>
+                </article>
+            `;
+        }
+
+        function renderMonthlyStatusChart(statusCounts) {
+            const statusConfig = [
+                { key: 'completed', label: 'Completed', tone: 'success' },
+                { key: 'in progress', label: 'In Progress', tone: 'info' },
+                { key: 'cancelled', label: 'Cancelled', tone: 'danger' },
+                { key: 'refund', label: 'Refund', tone: 'warning' },
+                { key: 'on hold', label: 'On Hold', tone: 'muted' },
+                { key: 'new', label: 'New', tone: 'accent' }
+            ];
+            const maxCount = Math.max(1, ...statusConfig.map((item) => Number(statusCounts[item.key] || 0)));
+            return `
+                <section class="monthly-chart-card">
+                    <div class="monthly-chart-head">
+                        <div>
+                            <h4 class="monthly-chart-title">Task Status Overview</h4>
+                            <p class="monthly-chart-subtitle">Separate count for each order status.</p>
+                        </div>
+                    </div>
+                    <div class="monthly-status-chart">
+                        ${statusConfig.map((item) => {
+                            const count = Number(statusCounts[item.key] || 0);
+                            const width = Math.max(6, Math.round((count / maxCount) * 100));
+                            return `
+                                <div class="monthly-status-row">
+                                    <div class="monthly-status-meta">
+                                        <span class="monthly-status-label">${escapeHtml(item.label)}</span>
+                                        <span class="monthly-status-count">${escapeHtml(String(count))}</span>
+                                    </div>
+                                    <div class="monthly-status-track">
+                                        <span class="monthly-status-fill tone-${item.tone}" style="width:${width}%"></span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderMonthlyFinanceChart(title, subtitle, weeklyValues, tone, formatter) {
+            const maxValue = Math.max(1, ...weeklyValues.map((item) => Math.abs(Number(item.value || 0))));
+            return `
+                <section class="monthly-chart-card">
+                    <div class="monthly-chart-head">
+                        <div>
+                            <h4 class="monthly-chart-title">${escapeHtml(title)}</h4>
+                            <p class="monthly-chart-subtitle">${escapeHtml(subtitle)}</p>
+                        </div>
+                    </div>
+                    <div class="monthly-bars">
+                        ${weeklyValues.map((item) => {
+                            const numericValue = Number(item.value || 0);
+                            const height = Math.max(10, Math.round((Math.abs(numericValue) / maxValue) * 120));
+                            return `
+                                <div class="monthly-bar-col">
+                                    <span class="monthly-bar-value">${escapeHtml(formatter(numericValue))}</span>
+                                    <div class="monthly-bar-track">
+                                        <span class="monthly-bar-fill tone-${tone}${numericValue < 0 ? ' is-negative' : ''}" style="height:${height}px"></span>
+                                    </div>
+                                    <span class="monthly-bar-label">${escapeHtml(item.label)}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </section>
+            `;
+        }
+
+        function buildMonthlyDataDashboardHtml(selectedMonthInput) {
+            const selectedMonth = (selectedMonthInput || getDefaultMonthlyDataMonth()).trim();
+            const rows = getStoredOrderCardsSnapshot();
+            const monthCards = rows.filter((card) => {
+                const date = getOrderAnalyticsDate(card);
+                if (!date) return false;
+                const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                return monthKey === selectedMonth;
+            });
+
+            if (!monthCards.length) {
+                return `
+                    <section class="monthly-data-view">
+                        <div class="monthly-empty-state">
+                            <h3>No monthly data found</h3>
+                            <p>No task activity is available for ${escapeHtml(selectedMonth)} yet.</p>
+                        </div>
+                    </section>
+                `;
+            }
+
+            const statusCounts = {
+                completed: 0,
+                'in progress': 0,
+                cancelled: 0,
+                refund: 0,
+                'on hold': 0,
+                new: 0
+            };
+            const weeklyRevenue = [0, 0, 0, 0, 0];
+            const weeklyExpense = [0, 0, 0, 0, 0];
+            const weeklyProfit = [0, 0, 0, 0, 0];
+
+            let totalRevenue = 0;
+            let totalTutorExpense = 0;
+            let completedTasks = 0;
+            let inProgressTasks = 0;
+            let cancelledTasks = 0;
+            let refundTasks = 0;
+
+            monthCards.forEach((card) => {
+                const status = getNormalizedOrderStatus(card);
+                const analyticsDate = getOrderAnalyticsDate(card) || new Date();
+                const weekIndex = Math.min(4, Math.max(0, Math.floor((analyticsDate.getDate() - 1) / 7)));
+                const orderAmount = parseAmountToNumber(card.querySelector('.order-amount')?.textContent || '');
+                const tutorExpense = parseAmountToNumber(card.dataset.expertPayout || card.querySelector('.order-expert-pay')?.textContent || '');
+
+                if (statusCounts[status] === undefined) {
+                    statusCounts[status] = 0;
+                }
+                statusCounts[status] += 1;
+
+                if (status === 'completed') completedTasks += 1;
+                if (status === 'in progress') inProgressTasks += 1;
+                if (status === 'cancelled') cancelledTasks += 1;
+                if (status === 'refund') refundTasks += 1;
+
+                const includeFinancials = status !== 'cancelled' && status !== 'refund';
+                const revenueValue = includeFinancials ? orderAmount : 0;
+                const expenseValue = includeFinancials ? tutorExpense : 0;
+                const profitValue = revenueValue - expenseValue;
+
+                totalRevenue += revenueValue;
+                totalTutorExpense += expenseValue;
+                weeklyRevenue[weekIndex] += revenueValue;
+                weeklyExpense[weekIndex] += expenseValue;
+                weeklyProfit[weekIndex] += profitValue;
+            });
+
+            const totalProfit = totalRevenue - totalTutorExpense;
+            const totalTasks = monthCards.length;
+            const [year, month] = selectedMonth.split('-');
+            const monthLabel = new Date(Number(year), Math.max(0, Number(month) - 1), 1).toLocaleDateString('en-IN', {
+                month: 'long',
+                year: 'numeric'
+            });
+            const weeklyLabels = ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'];
+
+            return `
+                <section class="monthly-data-view">
+                    <div class="monthly-data-hero">
+                        <div>
+                            <p class="monthly-data-kicker">Monthly Data</p>
+                            <h3 class="monthly-data-title">${escapeHtml(monthLabel)} Dashboard</h3>
+                            <p class="monthly-data-subtitle">Separate financial and status charts for the selected month.</p>
+                        </div>
+                        <div class="monthly-data-badge">${escapeHtml(String(totalTasks))} tasks</div>
+                    </div>
+                    <div class="monthly-metrics-grid">
+                        ${renderMonthlyMetricCard('Completed Tasks', String(completedTasks), 'success', `${totalTasks} total tasks this month`)}
+                        ${renderMonthlyMetricCard('Revenue', formatDashboardCurrency(totalRevenue), 'info', 'Excludes cancelled and refund orders')}
+                        ${renderMonthlyMetricCard('Tutor Expense', formatDashboardCurrency(totalTutorExpense), 'warning', 'Based on expert payout values')}
+                        ${renderMonthlyMetricCard('Profit', formatDashboardCurrency(totalProfit), totalProfit >= 0 ? 'success' : 'danger', 'Revenue minus tutor expense')}
+                        ${renderMonthlyMetricCard('In Progress', String(inProgressTasks), 'accent', 'Tasks currently active')}
+                        ${renderMonthlyMetricCard('Cancelled / Refund', `${cancelledTasks} / ${refundTasks}`, 'muted', 'Status dashboard overview')}
+                    </div>
+                    <div class="monthly-charts-grid">
+                        ${renderMonthlyStatusChart(statusCounts)}
+                        ${renderMonthlyFinanceChart('Revenue Chart', 'Weekly booked revenue trend.', weeklyLabels.map((label, index) => ({ label, value: weeklyRevenue[index] })), 'info', formatDashboardCurrency)}
+                        ${renderMonthlyFinanceChart('Tutor Expense Chart', 'Weekly expert payout trend.', weeklyLabels.map((label, index) => ({ label, value: weeklyExpense[index] })), 'warning', formatDashboardCurrency)}
+                        ${renderMonthlyFinanceChart('Profit Chart', 'Weekly profit trend.', weeklyLabels.map((label, index) => ({ label, value: weeklyProfit[index] })), totalProfit >= 0 ? 'success' : 'danger', formatDashboardCurrency)}
+                    </div>
+                </section>
+            `;
+        }
+
+        function renderMonthlyDataDashboard() {
+            if (!orderList || activeOrderTab !== 'monthly') return;
+            const selectedMonth = (monthlyDataMonthInput?.value || getDefaultMonthlyDataMonth()).trim();
+            if (monthlyDataMonthInput && !monthlyDataMonthInput.value) {
+                monthlyDataMonthInput.value = selectedMonth;
+            }
+            orderList.innerHTML = buildMonthlyDataDashboardHtml(selectedMonth);
+        }
+
+        function renderMonthlyDataModalContent() {
+            if (!monthlyDataModalContent) return;
+            const selectedMonth = (monthlyDataMonthModalInput?.value || getDefaultMonthlyDataMonth()).trim();
+            if (monthlyDataMonthModalInput && !monthlyDataMonthModalInput.value) {
+                monthlyDataMonthModalInput.value = selectedMonth;
+            }
+            monthlyDataModalContent.innerHTML = buildMonthlyDataDashboardHtml(selectedMonth);
+        }
+
+        function openMonthlyDataModal() {
+            if (!monthlyDataModal || !isAdminUser) return;
+            if (monthlyDataMonthModalInput && !monthlyDataMonthModalInput.value) {
+                monthlyDataMonthModalInput.value = monthlyDataMonthInput?.value || getDefaultMonthlyDataMonth();
+            }
+            renderMonthlyDataModalContent();
+            monthlyDataModal.classList.remove('hidden');
+        }
+
+        function closeMonthlyDataModal() {
+            monthlyDataModal?.classList.add('hidden');
+        }
+
         function getOrderDeliveryWindowMs() {
             const value = String(orderDeliveryWindow?.value || '').trim();
             if (!value) return 0;
@@ -561,6 +883,10 @@ lucide.createIcons();
         function applyOrderSearchFilter() {
             if (activeOrderTab === 'expert') {
                 renderExpertList();
+                return;
+            }
+            if (activeOrderTab === 'monthly') {
+                renderMonthlyDataDashboard();
                 return;
             }
             const query = (orderSearch.value || '').trim().toLowerCase().replace('#', '');
@@ -605,11 +931,27 @@ lucide.createIcons();
         }
 
         function setOrderTab(tab) {
-            activeOrderTab = ['mine', 'expert', 'all'].includes(tab) ? tab : 'mine';
-            [orderTabMine, orderTabExpert, orderTabAll].forEach((btn) => {
+            const allowedTabs = isAdminUser
+                ? ['mine', 'expert', 'all', 'monthly']
+                : ['mine', 'expert', 'all'];
+            activeOrderTab = allowedTabs.includes(tab) ? tab : 'mine';
+            [orderTabMine, orderTabExpert, orderTabAll, orderTabMonthly].forEach((btn) => {
                 if (!btn) return;
                 btn.classList.toggle('is-active', btn.dataset.orderTab === activeOrderTab);
             });
+            if (orderSearchRow) {
+                orderSearchRow.classList.toggle('hidden', activeOrderTab === 'monthly');
+            }
+            if (monthlyDataControls) {
+                monthlyDataControls.classList.toggle('hidden', activeOrderTab !== 'monthly' || !isAdminUser);
+            }
+            if (orderSearch) {
+                orderSearch.placeholder = activeOrderTab === 'expert' ? 'Search experts...' : 'Search for orders...';
+            }
+            if (activeOrderTab === 'monthly') {
+                renderMonthlyDataDashboard();
+                return;
+            }
             if (activeOrderTab === 'expert') {
                 renderExpertList();
                 return;
@@ -714,6 +1056,7 @@ lucide.createIcons();
             aiAssistBtn.title = activeItem
                 ? (mode === 'ai' ? 'AI is active for this chat' : 'Transfer this chat to AI')
                 : 'Select a contact first';
+            updateChatAssignmentState(activeItem?.dataset?.waId || activeWhatsappWaId || '');
         }
 
         async function setContactAiMode(waId, mode) {
@@ -739,6 +1082,9 @@ lucide.createIcons();
             if (activeItem) {
                 activeItem.dataset.aiMode = mode;
                 updateAiAssistButtonState(activeItem);
+            }
+            if (activeWhatsappWaId === normalizedWaId) {
+                updateChatAssignmentState(normalizedWaId);
             }
             return data;
         }
@@ -781,6 +1127,7 @@ lucide.createIcons();
                 updateTaskClientInputFromContact(null);
                 renderWhatsappMessages('');
                 updateAiAssistButtonState(null);
+                updateChatAssignmentState('');
                 clearChatInitiationPreview();
             }
 
@@ -1047,6 +1394,126 @@ lucide.createIcons();
         function getManualContactByWaId(waId) {
             const normalizedWaId = normalizeWaId(waId);
             return readManualContactsFromStorage().find((row) => normalizeWaId(row.waId) === normalizedWaId) || null;
+        }
+
+        function getAssignedAgentMetaByWaId(waId) {
+            const saved = getManualContactByWaId(waId);
+            return {
+                name: String(saved?.assignedAgent || '').trim(),
+                email: String(saved?.assignedAgentEmail || '').trim().toLowerCase()
+            };
+        }
+
+        function canCurrentAgentMessageContact(waId) {
+            const assigned = getAssignedAgentMetaByWaId(waId);
+            if (!assigned.email) return false;
+            return assigned.email === agentEmail;
+        }
+
+        function syncContactAssignmentBadge(item) {
+            if (!item) return;
+            const assignedName = String(item.dataset.assignedAgent || '').trim();
+            let badge = item.querySelector('.contact-assigned-badge');
+            if (!assignedName) {
+                badge?.remove();
+                return;
+            }
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'contact-assigned-badge';
+                item.querySelector('.contact-secondary-row')?.appendChild(badge);
+            }
+            badge.textContent = assignedName;
+            badge.title = 'Assigned to ' + assignedName;
+        }
+
+        function updateChatAssignmentState(waId) {
+            const assigned = getAssignedAgentMetaByWaId(waId);
+            const hasThread = Boolean(waId);
+            const canMessage = hasThread && canCurrentAgentMessageContact(waId) && !whatsappSendInFlight;
+            const isAssigned = Boolean(assigned.email);
+            const assignedToCurrent = isAssigned && assigned.email === agentEmail;
+
+            if (assignActiveChatAgentBtn) {
+                assignActiveChatAgentBtn.disabled = !hasThread;
+                assignActiveChatAgentBtn.textContent = !hasThread
+                    ? 'Assign Agent'
+                    : isAssigned
+                        ? `Assigned: ${assigned.name || 'Agent'}`
+                        : 'Assign Agent';
+                assignActiveChatAgentBtn.title = !hasThread
+                    ? 'Select a contact first'
+                    : assignedToCurrent
+                        ? 'This chat is assigned to you'
+                        : isAssigned
+                            ? `Assigned to ${assigned.name || 'another agent'}. Click to assign to yourself.`
+                            : 'Assign this chat to yourself';
+            }
+
+            if (chatAssignmentHintEl) {
+                if (!hasThread) {
+                    chatAssignmentHintEl.classList.add('hidden');
+                    chatAssignmentHintEl.textContent = '';
+                } else if (!isAssigned) {
+                    chatAssignmentHintEl.classList.remove('hidden');
+                    chatAssignmentHintEl.textContent = 'Assign this chat to an agent before sending messages';
+                } else {
+                    chatAssignmentHintEl.classList.remove('hidden');
+                    chatAssignmentHintEl.textContent = assignedToCurrent
+                        ? `Assigned to ${assigned.name}`
+                        : `Assigned to ${assigned.name}. Messaging is locked on this device.`;
+                }
+            }
+
+            if (chatInput) {
+                if (!chatInput.dataset.defaultPlaceholder) {
+                    chatInput.dataset.defaultPlaceholder = chatInput.getAttribute('placeholder') || 'Type message here...';
+                }
+                chatInput.readOnly = hasThread ? !canMessage : true;
+                chatInput.value = hasThread && !canMessage ? '' : chatInput.value;
+                chatInput.setAttribute(
+                    'placeholder',
+                    !hasThread
+                        ? 'Type message here...'
+                        : canMessage
+                            ? (chatInput.dataset.defaultPlaceholder || 'Type message here...')
+                            : isAssigned
+                                ? `Assigned to ${assigned.name || 'another agent'}`
+                                : 'Assign this chat to start messaging'
+                );
+            }
+
+            if (sendBtn) sendBtn.disabled = !canMessage;
+            if (attachFileBtn) attachFileBtn.disabled = !canMessage;
+            if (notifyBtn) notifyBtn.disabled = !canMessage;
+        }
+
+        async function assignContactToCurrentAgent(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+            const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            const profileName = item?.dataset?.profileName || item?.querySelector('.contact-name')?.textContent?.trim() || normalizedWaId;
+            saveManualContact({
+                waId: normalizedWaId,
+                profileName,
+                tag: item?.dataset?.tag || '',
+                universityName: item?.dataset?.universityName || '',
+                semester: item?.dataset?.semester || '',
+                timezone: item?.dataset?.timezone || getAutoTimezone(),
+                assignedAgent: agentName,
+                assignedAgentEmail: agentEmail
+            });
+            if (item) {
+                item.dataset.assignedAgent = agentName;
+                item.dataset.assignedAgentEmail = agentEmail;
+                syncContactAssignmentBadge(item);
+                updateContactStateUI(item);
+            }
+            try {
+                await setContactAiMode(normalizedWaId, 'human');
+            } catch {}
+            updateChatAssignmentState(normalizedWaId);
+            scheduleCrmStateSave();
         }
 
         function setClientDetailsEditMode(nextMode) {
@@ -1345,7 +1812,9 @@ lucide.createIcons();
                 tag: typeof contact.tag === 'string' ? contact.tag : String(previous?.tag || ''),
                 universityName: typeof contact.universityName === 'string' ? contact.universityName : String(previous?.universityName || ''),
                 semester: typeof contact.semester === 'string' ? contact.semester : String(previous?.semester || ''),
-                timezone: typeof contact.timezone === 'string' ? contact.timezone : String(previous?.timezone || getAutoTimezone())
+                timezone: typeof contact.timezone === 'string' ? contact.timezone : String(previous?.timezone || getAutoTimezone()),
+                assignedAgent: typeof contact.assignedAgent === 'string' ? contact.assignedAgent : String(previous?.assignedAgent || ''),
+                assignedAgentEmail: typeof contact.assignedAgentEmail === 'string' ? String(contact.assignedAgentEmail || '').trim().toLowerCase() : String(previous?.assignedAgentEmail || '').trim().toLowerCase()
             };
             if (existingIndex >= 0) {
                 rows[existingIndex] = payload;
@@ -2092,10 +2561,15 @@ lucide.createIcons();
             const actualRaw = actualEl?.dataset.baseValue || actualEl?.textContent || '';
             const expertRaw = expertEl?.dataset.baseValue || expertEl?.textContent || '';
             let dueSoonChip = card.querySelector('.order-due-soon-chip');
+            const titleRow = card.querySelector('.order-title-row');
 
-            if (!dueSoonChip && orderIdEl) {
+            if (!dueSoonChip) {
                 dueSoonChip = document.createElement('span');
                 dueSoonChip.className = 'order-due-soon-chip hidden text-[9px] font-semibold uppercase tracking-[0.08em] px-2 py-0.5 rounded-full';
+            }
+            if (titleRow && dueSoonChip.parentElement !== titleRow) {
+                titleRow.appendChild(dueSoonChip);
+            } else if (!titleRow && orderIdEl && dueSoonChip.parentElement !== orderIdEl.parentElement) {
                 orderIdEl.insertAdjacentElement('afterend', dueSoonChip);
             }
 
@@ -2760,6 +3234,7 @@ lucide.createIcons();
             if (!item.dataset.tag) item.dataset.tag = '';
             if (!item.dataset.active) item.dataset.active = 'false';
             if (!item.dataset.lastActivity) item.dataset.lastActivity = '0';
+            syncContactAssignmentBadge(item);
             updateContactStateUI(item);
 
             const menuToggleBtn = item.querySelector('.contact-menu-toggle');
@@ -2801,7 +3276,7 @@ lucide.createIcons();
                 assignAgentBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     try {
-                        await setContactAiMode(item.dataset.waId || '', 'human');
+                        await assignContactToCurrentAgent(item.dataset.waId || '');
                         openContactMenuId = '';
                         item.classList.remove('is-menu-open');
                         item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -2906,6 +3381,7 @@ lucide.createIcons();
                 if (chatHeaderTitle) chatHeaderTitle.textContent = name;
                 if (chatHeaderAvatar) chatHeaderAvatar.textContent = (name.charAt(0) || '?').toUpperCase();
                 updateAiAssistButtonState(item);
+                updateChatAssignmentState(waId);
                 updateChatHeaderVisibility(waId);
                 renderWhatsappMessages(waId);
                 updateChatWindowState(waId);
@@ -3132,16 +3608,18 @@ lucide.createIcons();
 
         function setChatSendState(isBusy, label) {
             whatsappSendInFlight = Boolean(isBusy);
+            const canMessage = canCurrentAgentMessageContact(activeWhatsappWaId);
             if (sendBtn) {
-                sendBtn.disabled = whatsappSendInFlight;
+                sendBtn.disabled = whatsappSendInFlight || !canMessage;
                 sendBtn.classList.toggle('is-loading', whatsappSendInFlight);
                 sendBtn.classList.toggle('is-disabled', whatsappSendInFlight);
                 sendBtn.setAttribute('aria-busy', whatsappSendInFlight ? 'true' : 'false');
                 sendBtn.title = whatsappSendInFlight ? (label || 'Sending...') : 'Send message';
             }
-            if (notifyBtn) notifyBtn.disabled = whatsappSendInFlight;
-            if (attachFileBtn) attachFileBtn.disabled = whatsappSendInFlight;
-            if (chatInput) chatInput.readOnly = whatsappSendInFlight;
+            if (notifyBtn) notifyBtn.disabled = whatsappSendInFlight || !canMessage;
+            if (attachFileBtn) attachFileBtn.disabled = whatsappSendInFlight || !canMessage;
+            if (chatInput) chatInput.readOnly = whatsappSendInFlight || !canMessage;
+            updateChatAssignmentState(activeWhatsappWaId);
         }
 
         function getStatusTickHtml(rawStatus) {
@@ -3366,10 +3844,12 @@ lucide.createIcons();
             const nextUniversityName = String(contact.universityName || savedContact?.universityName || existing?.dataset.universityName || '');
             const nextSemester = String(contact.semester || savedContact?.semester || existing?.dataset.semester || '');
             const nextTimezone = String(contact.timezone || savedContact?.timezone || existing?.dataset.timezone || getAutoTimezone());
+            const nextAssignedAgent = String(contact.assignedAgent || savedContact?.assignedAgent || existing?.dataset.assignedAgent || '');
+            const nextAssignedAgentEmail = String(contact.assignedAgentEmail || savedContact?.assignedAgentEmail || existing?.dataset.assignedAgentEmail || '').trim().toLowerCase();
             const contactId = getOrCreateWhatsappContactId(normalizedWaId);
             const linkedExpert = getExpertByWaId(normalizedWaId);
             const expertId = String(linkedExpert?.expertId || '');
-            saveManualContact({ waId: normalizedWaId, profileName, tag: nextTag, universityName: nextUniversityName, semester: nextSemester, timezone: nextTimezone });
+            saveManualContact({ waId: normalizedWaId, profileName, tag: nextTag, universityName: nextUniversityName, semester: nextSemester, timezone: nextTimezone, assignedAgent: nextAssignedAgent, assignedAgentEmail: nextAssignedAgentEmail });
             if (!existing) {
                 const item = document.createElement('div');
                 item.className = 'contact-item p-3 border-b hover:bg-gray-50 cursor-pointer';
@@ -3383,6 +3863,8 @@ lucide.createIcons();
                 item.dataset.universityName = nextUniversityName;
                 item.dataset.semester = nextSemester;
                 item.dataset.timezone = nextTimezone;
+                item.dataset.assignedAgent = nextAssignedAgent;
+                item.dataset.assignedAgentEmail = nextAssignedAgentEmail;
                 item.dataset.expertId = expertId;
                 item.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : 'human');
                 item.innerHTML = `
@@ -3397,6 +3879,7 @@ lucide.createIcons();
                                 <div class="contact-secondary-row">
                                     <p class="contact-meta text-xs text-gray-500">ID: ${escapeHtml(contactId)}</p>
                                     ${expertId ? `<span class="contact-expert-id-badge" title="Expert ID">${escapeHtml(expertId)}</span>` : ''}
+                                    ${nextAssignedAgent ? `<span class="contact-assigned-badge" title="Assigned to ${escapeHtml(nextAssignedAgent)}">${escapeHtml(nextAssignedAgent)}</span>` : ''}
                                     <span class="contact-label-badge hidden"></span>
                                     <span class="contact-pin-icon hidden" aria-hidden="true">
                                         <svg viewBox="0 0 16 16"><path d="M10.3 1.2c1.4 0 2.5 1.1 2.5 2.5 0 .6-.2 1.1-.5 1.5L10.8 7v2.2l1.1 1.1c.2.2.2.6 0 .8s-.6.2-.8 0L10 10H8.4l-3.8 3.8c-.2.2-.6.2-.8 0s-.2-.6 0-.8L7.6 9.2V7.6L6.5 6.5c-.2-.2-.2-.6 0-.8s.6-.2.8 0l1.1 1.1h2.2l1.5-1.5c.4-.4.5-.9.5-1.5 0-.8-.7-1.5-1.5-1.5S9.6 3 9.6 3.8c0 .2-.1.4-.3.5l-1.5 1c-.3.2-.6.1-.8-.2s-.1-.6.2-.8l1.2-.8c.2-1.3 1.3-2.3 2.6-2.3Z"></path><circle cx="10.3" cy="3.8" r="0.8"></circle></svg>
@@ -3447,6 +3930,8 @@ lucide.createIcons();
                 existing.dataset.universityName = nextUniversityName;
                 existing.dataset.semester = nextSemester;
                 existing.dataset.timezone = nextTimezone;
+                existing.dataset.assignedAgent = nextAssignedAgent;
+                existing.dataset.assignedAgentEmail = nextAssignedAgentEmail;
                 existing.dataset.expertId = expertId;
                 existing.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : existing.dataset.aiMode || 'human');
                 const metaEl = existing.querySelector('.contact-meta') || existing.querySelector('p');
@@ -3470,6 +3955,7 @@ lucide.createIcons();
                     expertBadgeEl.remove();
                 }
             }
+            syncContactAssignmentBadge(existing);
             const tagSelect = existing.querySelector('.contact-menu-label');
             if (tagSelect) tagSelect.value = nextTag;
             if (activeWhatsappWaId && activeWhatsappWaId === normalizedWaId) {
@@ -3751,6 +4237,7 @@ lucide.createIcons();
         setActiveContactItem(null);
         updateTaskClientInputFromContact(null);
         updateAiAssistButtonState(null);
+        updateChatAssignmentState('');
         restoreManualContactsFromStorage();
         scheduleContactOrderRefresh();
         initWhatsappSync();
@@ -3821,6 +4308,23 @@ lucide.createIcons();
                 importExpertsFileInput?.click();
             });
         }
+
+        if (navMonthlyDataBtn && isAdminUser) {
+            navMonthlyDataBtn.addEventListener('click', () => {
+                adminQuickMenu?.classList.add('hidden');
+                adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+                openMonthlyDataModal();
+            });
+        }
+
+        assignActiveChatAgentBtn?.addEventListener('click', async () => {
+            if (!activeWhatsappWaId) return;
+            try {
+                await assignContactToCurrentAgent(activeWhatsappWaId);
+            } catch (err) {
+                alert('Assign agent failed: ' + (err?.message || 'Unknown error'));
+            }
+        });
 
         if (importExpertsFileInput) {
             importExpertsFileInput.addEventListener('change', async (event) => {
@@ -3953,10 +4457,19 @@ lucide.createIcons();
         if (orderDeliveryWindow) {
             orderDeliveryWindow.addEventListener('change', applyOrderSearchFilter);
         }
-        [orderTabMine, orderTabExpert, orderTabAll].forEach((btn) => {
+        if (monthlyDataMonthInput && !monthlyDataMonthInput.value) {
+            monthlyDataMonthInput.value = getDefaultMonthlyDataMonth();
+        }
+        monthlyDataMonthInput?.addEventListener('change', renderMonthlyDataDashboard);
+        monthlyDataMonthModalInput?.addEventListener('change', renderMonthlyDataModalContent);
+        closeMonthlyDataModalBtn?.addEventListener('click', closeMonthlyDataModal);
+        [orderTabMine, orderTabExpert, orderTabAll, orderTabMonthly].forEach((btn) => {
             if (!btn) return;
             btn.addEventListener('click', () => setOrderTab(btn.dataset.orderTab || 'mine'));
         });
+        if (isAdminUser && initialViewMode === 'monthly-data') {
+            setOrderTab('monthly');
+        }
         applyExpertDeadlineConstraint();
         if (odActualDeadlineInput) {
             odActualDeadlineInput.addEventListener('input', applyExpertDeadlineConstraint);
@@ -4013,6 +4526,7 @@ lucide.createIcons();
             const isLiveSession = serviceType.toLowerCase() === 'live session';
             const sessionStart = (taskSessionStart.value || '').trim();
             const sessionDuration = (taskSessionDuration.value || '').trim();
+            const nowIso = new Date().toISOString();
 
             const card = document.createElement('div');
             card.className = 'order-card p-3 rounded-lg border shadow-sm';
@@ -4020,6 +4534,8 @@ lucide.createIcons();
             card.dataset.clientId = clientId;
             card.dataset.assignedTo = agentName;
             card.dataset.createdBy = agentName;
+            card.dataset.createdAt = nowIso;
+            card.dataset.updatedAt = nowIso;
             card.dataset.labels = '';
             card.dataset.description = '';
             card.dataset.instructions = '';
@@ -4181,6 +4697,7 @@ lucide.createIcons();
             activeOrderCard.dataset.clientPaidAmount = clientPaidAmount;
             activeOrderCard.dataset.paymentStatusOverride = paymentStatusOverride;
             activeOrderCard.dataset.expertPaymentStatus = expertPaymentStatus;
+            activeOrderCard.dataset.updatedAt = new Date().toISOString();
             syncOrderPaymentIndicator(activeOrderCard);
             syncOrderExpertPaymentIndicator(activeOrderCard);
             activeOrderCard.querySelector('.order-deadline').textContent = formatDateTimeForCard(actualDeadline || '');
@@ -4249,6 +4766,10 @@ lucide.createIcons();
         expertNotifyModal?.addEventListener('click', function(event) {
             if (event.target !== expertNotifyModal) return;
             closeExpertNotifyModal();
+        });
+        monthlyDataModal?.addEventListener('click', function(event) {
+            if (event.target !== monthlyDataModal) return;
+            closeMonthlyDataModal();
         });
         expertNotifySearch?.addEventListener('input', renderExpertNotifyList);
         expertNotifySelectAll?.addEventListener('change', function() {
@@ -4614,6 +5135,11 @@ lucide.createIcons();
                 alert('Select a WhatsApp contact first.');
                 return;
             }
+            if (!canCurrentAgentMessageContact(activeWhatsappWaId)) {
+                const assigned = getAssignedAgentMetaByWaId(activeWhatsappWaId);
+                alert(assigned.name ? ('This chat is assigned to ' + assigned.name + '.') : 'Assign this chat to yourself before sending messages.');
+                return;
+            }
             const windowState = getWhatsappWindowState(whatsappMessagesByContact[normalizeWaId(activeWhatsappWaId)] || []);
             if (windowState.state !== 'open') {
                 alert('This chat window is expired. Please use the chat initiation template first, then wait for the client reply before sending normal messages.');
@@ -4699,6 +5225,9 @@ lucide.createIcons();
         });
         // Logout
         document.getElementById('logoutBtn').onclick = function() {
+            localStorage.removeItem('crmAuthSession');
+            localStorage.removeItem('crmAuthToken');
+            localStorage.removeItem('crmAuthEmail');
             localStorage.removeItem('agentName');
             localStorage.removeItem('agentRole');
             window.location.href = 'login.html';

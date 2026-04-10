@@ -1177,6 +1177,19 @@ html[data-theme="dark"] .chat-empty-state {
   color: #3657d6;
 }
 
+.contact-assigned-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.46rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  background: rgba(249, 115, 22, 0.14);
+  color: #c2410c;
+}
+
 .contact-label-badge.is-new {
   background: rgba(34, 197, 94, 0.12);
   color: #16a34a;
@@ -1304,6 +1317,10 @@ html[data-theme="dark"] .chat-empty-state {
 .order-detail-label {
   background: rgba(59, 130, 246, 0.12) !important;
   color: #2563eb !important;
+  font-size: 0.63rem !important;
+  padding: 0.28rem 0.58rem !important;
+  border-radius: 0.7rem !important;
+  letter-spacing: 0.04em;
 }
 
 .order-title {
@@ -1317,15 +1334,19 @@ html[data-theme="dark"] .chat-empty-state {
 
 .order-title-row {
   margin-top: 0.45rem;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
+  width: 100%;
 }
 
 .order-card .order-status {
   background: rgba(255, 255, 255, 0.92) !important;
   color: #2563eb !important;
+  font-size: 0.62rem !important;
+  padding: 0.24rem 0.52rem !important;
+  border-radius: 999px !important;
 }
 
 .order-card[data-order-status="in progress"] .order-status {
@@ -1371,6 +1392,26 @@ html[data-theme="dark"] .chat-empty-state {
 .order-card .open-expert-notify-btn.is-notified {
   background: rgba(34, 197, 94, 0.16) !important;
   color: #15803d !important;
+}
+
+.order-due-soon-chip {
+  font-size: 0.58rem !important;
+  padding: 0.2rem 0.46rem !important;
+  border-radius: 999px !important;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  line-height: 1.1;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.order-card .mb-2 .flex.items-center.gap-2 {
+  gap: 0.38rem !important;
+}
+
+.order-card .order-created-by-top,
+.order-card .order-id {
+  font-size: 0.66rem !important;
 }
 
 .expert-notify-list {
@@ -1918,6 +1959,11 @@ html[data-theme="dark"] .contact-item[data-active="true"] .contact-meta {
 html[data-theme="dark"] .contact-expert-id-badge {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(124, 136, 255, 0.24));
   color: #c7d2fe;
+}
+
+html[data-theme="dark"] .contact-assigned-badge {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
 }
 
 html[data-theme="dark"] .contact-avatar {
@@ -2480,5 +2526,400 @@ html[data-theme="dark"] .contact-filter option {
     justify-content: space-between;
     border-left: 0;
     padding-left: 0;
+  }
+}
+
+.monthly-data-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.monthly-data-controls-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.monthly-data-month-input {
+  width: 170px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: none;
+}
+
+.monthly-data-month-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  display: none;
+}
+
+.monthly-data-view {
+  display: grid;
+  gap: 14px;
+}
+
+.monthly-data-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(99, 102, 241, 0.14);
+  background:
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.18), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(240, 244, 255, 0.94));
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.monthly-data-kicker {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6366f1;
+}
+
+.monthly-data-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.monthly-data-subtitle {
+  margin: 6px 0 0;
+  max-width: 520px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.monthly-data-badge {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.monthly-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.monthly-metric-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+}
+
+.monthly-metric-card.tone-success {
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(209, 250, 229, 0.92));
+}
+
+.monthly-metric-card.tone-info {
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(219, 234, 254, 0.92));
+}
+
+.monthly-metric-card.tone-warning {
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(254, 240, 138, 0.24));
+}
+
+.monthly-metric-card.tone-danger {
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(254, 202, 202, 0.3));
+}
+
+.monthly-metric-card.tone-accent {
+  background: linear-gradient(135deg, rgba(245, 243, 255, 0.98), rgba(224, 231, 255, 0.92));
+}
+
+.monthly-metric-card.tone-muted {
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(226, 232, 240, 0.92));
+}
+
+.monthly-metric-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.monthly-metric-value {
+  margin: 8px 0 4px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.monthly-metric-helper {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.monthly-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.monthly-chart-card {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.monthly-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.monthly-chart-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.monthly-chart-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.monthly-status-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.monthly-status-row {
+  display: grid;
+  gap: 6px;
+}
+
+.monthly-status-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.monthly-status-label {
+  font-weight: 700;
+  color: #334155;
+}
+
+.monthly-status-count {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.monthly-status-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.85);
+  overflow: hidden;
+}
+
+.monthly-status-fill,
+.monthly-bar-fill {
+  display: block;
+  border-radius: inherit;
+}
+
+.monthly-status-fill.tone-success,
+.monthly-bar-fill.tone-success {
+  background: linear-gradient(180deg, #10b981, #059669);
+}
+
+.monthly-status-fill.tone-info,
+.monthly-bar-fill.tone-info {
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+}
+
+.monthly-status-fill.tone-warning,
+.monthly-bar-fill.tone-warning {
+  background: linear-gradient(180deg, #f59e0b, #d97706);
+}
+
+.monthly-status-fill.tone-danger,
+.monthly-bar-fill.tone-danger {
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+}
+
+.monthly-status-fill.tone-accent,
+.monthly-bar-fill.tone-accent {
+  background: linear-gradient(180deg, #8b5cf6, #7c3aed);
+}
+
+.monthly-status-fill.tone-muted,
+.monthly-bar-fill.tone-muted {
+  background: linear-gradient(180deg, #94a3b8, #64748b);
+}
+
+.monthly-bars {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.monthly-bar-col {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.monthly-bar-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  text-align: center;
+}
+
+.monthly-bar-track {
+  width: 100%;
+  min-height: 128px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(226, 232, 240, 0.82));
+}
+
+.monthly-bar-fill {
+  width: 100%;
+  max-width: 54px;
+  min-height: 10px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
+.monthly-bar-fill.is-negative {
+  filter: saturate(0.85) brightness(0.9);
+}
+
+.monthly-bar-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-align: center;
+}
+
+.monthly-empty-state {
+  padding: 32px 20px;
+  border-radius: 18px;
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.7);
+  text-align: center;
+}
+
+.monthly-empty-state h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.monthly-empty-state p {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+html[data-theme="dark"] .monthly-data-controls-label,
+html[data-theme="dark"] .monthly-bar-label,
+html[data-theme="dark"] .monthly-chart-subtitle,
+html[data-theme="dark"] .monthly-metric-helper,
+html[data-theme="dark"] .monthly-data-subtitle {
+  color: #cbd5e1;
+}
+
+html[data-theme="dark"] .monthly-data-month-input,
+html[data-theme="dark"] .monthly-chart-card,
+html[data-theme="dark"] .monthly-metric-card,
+html[data-theme="dark"] .monthly-empty-state {
+  background: rgba(17, 27, 33, 0.96);
+  border-color: rgba(71, 85, 105, 0.42);
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .monthly-data-hero {
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.2), transparent 34%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.94));
+  border-color: rgba(99, 102, 241, 0.26);
+}
+
+html[data-theme="dark"] .monthly-data-title,
+html[data-theme="dark"] .monthly-chart-title,
+html[data-theme="dark"] .monthly-metric-value,
+html[data-theme="dark"] .monthly-status-count,
+html[data-theme="dark"] .monthly-empty-state h3 {
+  color: #f8fafc;
+}
+
+html[data-theme="dark"] .monthly-metric-label,
+html[data-theme="dark"] .monthly-status-label,
+html[data-theme="dark"] .monthly-bar-value {
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .monthly-status-track {
+  background: rgba(51, 65, 85, 0.75);
+}
+
+html[data-theme="dark"] .monthly-bar-track {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.96));
+}
+
+@media (max-width: 1100px) {
+  .monthly-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .monthly-data-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .monthly-bars {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .monthly-data-month-input {
+    width: 100%;
+  }
+
+  .monthly-data-controls {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

@@ -102,6 +102,37 @@ What this does:
 
 Without Firebase envs, the app falls back to in-memory storage only.
 
+## Firebase Auth login
+
+The CRM login page now uses Firebase Authentication instead of hardcoded local credentials.
+
+Supported flows:
+
+- Email + password login
+- Secure email sign-in link
+- Password reset email
+- Backend-verified admin / agent role gating
+
+Add these env vars to the backend service:
+
+```env
+FIREBASE_WEB_API_KEY=your_firebase_web_api_key
+FIREBASE_WEB_AUTH_DOMAIN=your-project.firebaseapp.com
+FIREBASE_WEB_PROJECT_ID=your-project-id
+FIREBASE_WEB_APP_ID=your_web_app_id
+FIREBASE_WEB_MESSAGING_SENDER_ID=your_sender_id
+FIREBASE_WEB_STORAGE_BUCKET=your-project.firebasestorage.app
+FIREBASE_AUTH_ADMIN_EMAILS=admin1@yourcompany.com,admin2@yourcompany.com
+FIREBASE_AUTH_AGENT_EMAILS=agent1@yourcompany.com,agent2@yourcompany.com
+```
+
+Behavior:
+
+- Only emails in `FIREBASE_AUTH_ADMIN_EMAILS` can open admin-only controls
+- Emails in `FIREBASE_AUTH_AGENT_EMAILS` can sign in as agents
+- If `FIREBASE_AUTH_AGENT_EMAILS` is left blank, any non-admin authenticated Firebase email is treated as an agent
+- Unauthorized emails are blocked after Firebase sign-in verification
+
 ## AI Agent (WhatsApp auto-reply + pricing handoff)
 
 The backend now supports an AI auto-reply flow for WhatsApp.
