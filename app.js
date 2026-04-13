@@ -35,13 +35,23 @@ lucide.createIcons();
             window.location.href = 'login.html';
         }
         const adminServerStatusPanel = document.getElementById('adminServerStatusPanel');
-        const agentName = storedAgentName || 'Aayush';
+        const AGENT_ROSTER_STORAGE_KEY = 'unisolvex_agent_roster_v1';
+        const ACTIVE_AGENT_NAME_STORAGE_KEY = 'unisolvex_active_agent_name_v1';
+        let agentName = String(localStorage.getItem(ACTIVE_AGENT_NAME_STORAGE_KEY) || '').trim() || storedAgentName || 'Aayush';
         const agentEmail = storedAgentEmail;
         if (adminServerStatusPanel && storedAgentRole !== 'admin') {
             adminServerStatusPanel.classList.add('hidden');
         }
-        document.getElementById('agentNameDisplay').textContent = (storedAgentRole === 'admin' ? 'Admin: ' : 'Agent: ') + agentName;
-        document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
+        const assignAgentModal = document.getElementById('assignAgentModal');
+        const assignAgentModalTitle = document.getElementById('assignAgentModalTitle');
+        const assignAgentModalSubtitle = document.getElementById('assignAgentModalSubtitle');
+        const closeAssignAgentModalBtn = document.getElementById('closeAssignAgentModalBtn');
+        const cancelAssignAgentModalBtn = document.getElementById('cancelAssignAgentModalBtn');
+        const confirmAssignAgentBtn = document.getElementById('confirmAssignAgentBtn');
+        const assignAgentList = document.getElementById('assignAgentList');
+        const assignAgentAdminPanel = document.getElementById('assignAgentAdminPanel');
+        const assignAgentNameInput = document.getElementById('assignAgentNameInput');
+        const addAssignAgentNameBtn = document.getElementById('addAssignAgentNameBtn');
         const themeToggleBtn = document.getElementById('themeToggleBtn');
         const assignActiveChatAgentBtn = document.getElementById('assignActiveChatAgentBtn');
         const themeIconSun = document.getElementById('themeIconSun');
@@ -135,6 +145,8 @@ lucide.createIcons();
         const sendBtn = document.getElementById('sendBtn');
         const attachFileBtn = document.getElementById('attachFileBtn');
         const aiAssistBtn = document.getElementById('aiAssistBtn');
+        document.getElementById('agentNameDisplay').textContent = 'Agent: ' + agentName;
+        document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
         let activeOrderCard = null;
         let activeNotifyOrderCard = null;
         let activeWhatsappWaId = '';
@@ -161,6 +173,7 @@ lucide.createIcons();
         const WHATSAPP_API_FALLBACK_TIMEOUT_MS = 2500;
         const WHATSAPP_POLL_INTERVAL_MS = 5000;
         const WHATSAPP_DEBUG_POLL_INTERVAL_MS = 8000;
+        const CRM_STATE_POLL_INTERVAL_MS = 5000;
         const WHATSAPP_CHAT_WINDOW_MS = 24 * 60 * 60 * 1000;
         const WHATSAPP_WINDOW_TICK_MS = 30000;
         const CRM_STATE_SAVE_DEBOUNCE_MS = 500;
@@ -187,11 +200,14 @@ lucide.createIcons();
         let activeOrderTab = 'mine';
         let experts = [];
         let selectedNotifyExpertIds = new Set();
+        let assignAgentModalMode = 'all';
+        let assignAgentModalWaId = '';
+        let selectedAssignAgentName = '';
+        let lastRenderedChatWaId = '';
         const ORDER_DETAILS_DRAFT_FIELD_IDS = [
             'odTitle',
             'odStatus',
             'odAssignedTo',
-            'odLabels',
             'odActualDeadline',
             'odExpertDeadline',
             'odBaseCurrency',
@@ -201,8 +217,6 @@ lucide.createIcons();
             'odClientPaidCurrency',
             'odClientPaidAmount',
             'odPaymentStatusOverride',
-            'odDescription',
-            'odTopic',
             'odExpertPaymentStatus',
             'odSessionStart',
             'odSessionDuration',
@@ -213,6 +227,75 @@ lucide.createIcons();
         let crmStateSaveTimer = null;
         let crmStateHydrationComplete = false;
         let crmStatePendingSave = false;
+        let crmStatePollingTimer = null;
+        let lastCrmStateUpdatedAt = '';
+
+        function normalizeAgentName(value) {
+            return String(value || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function getAgentKey(value) {
+            return normalizeAgentName(value).toLowerCase();
+        }
+
+        function readAgentRosterFromStorage() {
+            try {
+                const raw = localStorage.getItem(AGENT_ROSTER_STORAGE_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                const source = Array.isArray(parsed) ? parsed : [];
+                const next = [];
+                const seen = new Set();
+                source.forEach((entry) => {
+                    const name = normalizeAgentName(entry);
+                    const key = getAgentKey(name);
+                    if (!name || seen.has(key)) return;
+                    seen.add(key);
+                    next.push(name);
+                });
+                const fallbackName = normalizeAgentName(storedAgentName || agentName);
+                if (fallbackName && !seen.has(getAgentKey(fallbackName))) {
+                    next.unshift(fallbackName);
+                }
+                return next;
+            } catch {
+                return [normalizeAgentName(storedAgentName || agentName)].filter(Boolean);
+            }
+        }
+
+        function writeAgentRosterToStorage(names, skipRemote) {
+            const next = [];
+            const seen = new Set();
+            (Array.isArray(names) ? names : []).forEach((entry) => {
+                const name = normalizeAgentName(entry);
+                const key = getAgentKey(name);
+                if (!name || seen.has(key)) return;
+                seen.add(key);
+                next.push(name);
+            });
+            if (!next.length) {
+                next.push(normalizeAgentName(storedAgentName || agentName || 'Agent'));
+            }
+            localStorage.setItem(AGENT_ROSTER_STORAGE_KEY, JSON.stringify(next));
+            if (!skipRemote) scheduleCrmStateSave();
+            return next;
+        }
+
+        function ensureAgentRoster() {
+            return writeAgentRosterToStorage(readAgentRosterFromStorage(), true);
+        }
+
+        function setCurrentAgentName(nextName, skipRemote) {
+            const resolved = normalizeAgentName(nextName) || normalizeAgentName(storedAgentName || agentName || 'Agent');
+            agentName = resolved;
+            localStorage.setItem(ACTIVE_AGENT_NAME_STORAGE_KEY, resolved);
+            const roster = ensureAgentRoster();
+            if (!roster.some((entry) => getAgentKey(entry) === getAgentKey(resolved))) {
+                writeAgentRosterToStorage([...roster, resolved], skipRemote);
+            }
+            document.getElementById('agentNameDisplay').textContent = 'Agent: ' + resolved;
+            document.getElementById('agentInitialDisplay').textContent = resolved.charAt(0).toUpperCase();
+            updateChatAssignmentState(activeWhatsappWaId);
+        }
 
         function applyTheme(theme) {
             const nextTheme = theme === 'dark' ? 'dark' : 'light';
@@ -440,6 +523,7 @@ lucide.createIcons();
                 orderListHtml: localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '',
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
+                agentRoster: readAgentRosterFromStorage(),
                 whatsappContactIdMap: readWhatsappContactIdMapFromStorage(),
                 whatsappReadState: readWhatsappReadStateFromStorage(),
                 whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100,
@@ -460,6 +544,8 @@ lucide.createIcons();
                 if (!res.ok) {
                     throw new Error('CRM state save failed with status ' + res.status);
                 }
+                const data = await res.json().catch(() => ({}));
+                lastCrmStateUpdatedAt = String(data?.state?.updatedAt || data?.updatedAt || lastCrmStateUpdatedAt || '');
             } catch (err) {
                 console.warn('Failed to persist CRM state to backend:', err);
             }
@@ -502,6 +588,56 @@ lucide.createIcons();
             applyOrderSearchFilter();
         }
 
+        function applyCrmStateSnapshot(state, options = {}) {
+            const includeOrders = options.includeOrders !== false;
+            if (!state || typeof state !== 'object') return false;
+            const hasRemoteState =
+                typeof state.orderListHtml === 'string' ||
+                Array.isArray(state.manualContacts) ||
+                (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
+                Number.isFinite(Number(state.whatsappContactIdSequence));
+
+            if (!hasRemoteState) return false;
+
+            if (includeOrders) {
+                localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
+            }
+            localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.manualContacts) ? state.manualContacts : []));
+            localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.experts) ? state.experts : []));
+            writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
+            localStorage.setItem(
+                WHATSAPP_CONTACT_ID_MAP_KEY,
+                JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
+            );
+            localStorage.setItem(
+                WHATSAPP_READ_STATE_STORAGE_KEY,
+                JSON.stringify(state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {})
+            );
+            setWhatsappContactIdSequenceInStorage(
+                Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
+                true
+            );
+            localStorage.setItem(
+                EXPERT_ID_SEQUENCE_KEY,
+                String(Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1)
+            );
+            experts = readExpertsFromStorage();
+
+            if (includeOrders) {
+                orderList.innerHTML = '';
+                restoreOrderListFromStorage();
+                rehydrateOrderCardsFromDom();
+            }
+            restoreManualContactsFromStorage();
+            setCurrentAgentName(localStorage.getItem(ACTIVE_AGENT_NAME_STORAGE_KEY) || agentName, true);
+            if (activeWhatsappWaId) {
+                updateChatAssignmentState(activeWhatsappWaId);
+            }
+            scheduleContactOrderRefresh();
+            lastCrmStateUpdatedAt = String(state.updatedAt || lastCrmStateUpdatedAt || '');
+            return true;
+        }
+
         async function hydrateCrmStateFromBackend() {
             try {
                 const res = await whatsappFetch('/api/crm/state');
@@ -509,48 +645,44 @@ lucide.createIcons();
                     throw new Error('CRM state load failed with status ' + res.status);
                 }
                 const data = await res.json();
-                const state = data?.state && typeof data.state === 'object' ? data.state : null;
-                if (!state) return false;
-
-                const hasRemoteState =
-                    typeof state.orderListHtml === 'string' ||
-                    Array.isArray(state.manualContacts) ||
-                    (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
-                    Number.isFinite(Number(state.whatsappContactIdSequence));
-
-                if (!hasRemoteState) return false;
-
-                localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
-                localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.manualContacts) ? state.manualContacts : []));
-                localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.experts) ? state.experts : []));
-                localStorage.setItem(
-                    WHATSAPP_CONTACT_ID_MAP_KEY,
-                    JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
-                );
-                localStorage.setItem(
-                    WHATSAPP_READ_STATE_STORAGE_KEY,
-                    JSON.stringify(state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {})
-                );
-                setWhatsappContactIdSequenceInStorage(
-                    Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
-                    true
-                );
-                localStorage.setItem(
-                    EXPERT_ID_SEQUENCE_KEY,
-                    String(Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1)
-                );
-                experts = readExpertsFromStorage();
-
-                orderList.innerHTML = '';
-                restoreOrderListFromStorage();
-                rehydrateOrderCardsFromDom();
-                restoreManualContactsFromStorage();
-                scheduleContactOrderRefresh();
-                return true;
+                const state = data?.state && typeof data.state === 'object'
+                    ? data.state
+                    : (data && typeof data === 'object' ? data : null);
+                return applyCrmStateSnapshot(state, { includeOrders: true });
             } catch (err) {
                 console.warn('Failed to hydrate CRM state from backend:', err);
                 return false;
             }
+        }
+
+        async function syncCrmStateFromBackend() {
+            try {
+                const res = await whatsappFetch('/api/crm/state');
+                if (!res.ok) return false;
+                const data = await res.json();
+                const state = data?.state && typeof data.state === 'object'
+                    ? data.state
+                    : (data && typeof data === 'object' ? data : null);
+                if (!state) return false;
+                const nextUpdatedAt = String(state.updatedAt || '').trim();
+                const taskModalEl = document.getElementById('taskModal');
+                const isEditingTask = Boolean(orderDetailsModal && !orderDetailsModal.classList.contains('hidden'));
+                const isCreatingTask = Boolean(taskModalEl && !taskModalEl.classList.contains('hidden'));
+                if (nextUpdatedAt && lastCrmStateUpdatedAt && nextUpdatedAt === lastCrmStateUpdatedAt) {
+                    return false;
+                }
+                return applyCrmStateSnapshot(state, { includeOrders: !(isEditingTask || isCreatingTask) });
+            } catch (err) {
+                console.warn('Background CRM sync failed:', err);
+                return false;
+            }
+        }
+
+        function initCrmStatePolling() {
+            if (crmStatePollingTimer) return;
+            crmStatePollingTimer = setInterval(() => {
+                syncCrmStateFromBackend();
+            }, CRM_STATE_POLL_INTERVAL_MS);
         }
 
         function getNextOrderId(clientId) {
@@ -1400,69 +1532,44 @@ lucide.createIcons();
             const saved = getManualContactByWaId(waId);
             return {
                 name: String(saved?.assignedAgent || '').trim(),
+                key: String(saved?.assignedAgentKey || '').trim().toLowerCase(),
                 email: String(saved?.assignedAgentEmail || '').trim().toLowerCase()
             };
         }
 
         function canCurrentAgentMessageContact(waId) {
             const assigned = getAssignedAgentMetaByWaId(waId);
-            if (!assigned.email) return false;
-            return assigned.email === agentEmail;
+            const currentKey = getAgentKey(agentName);
+            if (assigned.key) return assigned.key === currentKey;
+            if (assigned.name) return getAgentKey(assigned.name) === currentKey;
+            if (assigned.email) return assigned.email === agentEmail;
+            return false;
         }
 
         function syncContactAssignmentBadge(item) {
             if (!item) return;
-            const assignedName = String(item.dataset.assignedAgent || '').trim();
             let badge = item.querySelector('.contact-assigned-badge');
-            if (!assignedName) {
-                badge?.remove();
-                return;
-            }
-            if (!badge) {
-                badge = document.createElement('span');
-                badge.className = 'contact-assigned-badge';
-                item.querySelector('.contact-secondary-row')?.appendChild(badge);
-            }
-            badge.textContent = assignedName;
-            badge.title = 'Assigned to ' + assignedName;
+            badge?.remove();
         }
 
         function updateChatAssignmentState(waId) {
             const assigned = getAssignedAgentMetaByWaId(waId);
             const hasThread = Boolean(waId);
             const canMessage = hasThread && canCurrentAgentMessageContact(waId) && !whatsappSendInFlight;
-            const isAssigned = Boolean(assigned.email);
-            const assignedToCurrent = isAssigned && assigned.email === agentEmail;
+            const isAssigned = Boolean(assigned.name || assigned.key || assigned.email);
+            const hasAnyContacts = contactList?.querySelectorAll('.contact-item').length > 0;
 
             if (assignActiveChatAgentBtn) {
-                assignActiveChatAgentBtn.disabled = !hasThread;
-                assignActiveChatAgentBtn.textContent = !hasThread
-                    ? 'Assign Agent'
-                    : isAssigned
+                assignActiveChatAgentBtn.disabled = !hasAnyContacts;
+                assignActiveChatAgentBtn.textContent = hasThread && isAssigned
                         ? `Assigned: ${assigned.name || 'Agent'}`
                         : 'Assign Agent';
-                assignActiveChatAgentBtn.title = !hasThread
-                    ? 'Select a contact first'
-                    : assignedToCurrent
-                        ? 'This chat is assigned to you'
-                        : isAssigned
-                            ? `Assigned to ${assigned.name || 'another agent'}. Click to assign to yourself.`
-                            : 'Assign this chat to yourself';
+                assignActiveChatAgentBtn.title = hasAnyContacts ? 'Open agent assignment popup' : 'No chats available yet';
             }
 
             if (chatAssignmentHintEl) {
-                if (!hasThread) {
-                    chatAssignmentHintEl.classList.add('hidden');
-                    chatAssignmentHintEl.textContent = '';
-                } else if (!isAssigned) {
-                    chatAssignmentHintEl.classList.remove('hidden');
-                    chatAssignmentHintEl.textContent = 'Assign this chat to an agent before sending messages';
-                } else {
-                    chatAssignmentHintEl.classList.remove('hidden');
-                    chatAssignmentHintEl.textContent = assignedToCurrent
-                        ? `Assigned to ${assigned.name}`
-                        : `Assigned to ${assigned.name}. Messaging is locked on this device.`;
-                }
+                chatAssignmentHintEl.classList.add('hidden');
+                chatAssignmentHintEl.textContent = '';
             }
 
             if (chatInput) {
@@ -1489,8 +1596,13 @@ lucide.createIcons();
         }
 
         async function assignContactToCurrentAgent(waId) {
+            await assignContactToAgent(waId, agentName);
+        }
+
+        async function assignContactToAgent(waId, nextAgentName) {
             const normalizedWaId = normalizeWaId(waId);
             if (!normalizedWaId) return;
+            const resolvedAgentName = normalizeAgentName(nextAgentName || agentName);
             const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
             const profileName = item?.dataset?.profileName || item?.querySelector('.contact-name')?.textContent?.trim() || normalizedWaId;
             saveManualContact({
@@ -1500,11 +1612,13 @@ lucide.createIcons();
                 universityName: item?.dataset?.universityName || '',
                 semester: item?.dataset?.semester || '',
                 timezone: item?.dataset?.timezone || getAutoTimezone(),
-                assignedAgent: agentName,
+                assignedAgent: resolvedAgentName,
+                assignedAgentKey: getAgentKey(resolvedAgentName),
                 assignedAgentEmail: agentEmail
             });
             if (item) {
-                item.dataset.assignedAgent = agentName;
+                item.dataset.assignedAgent = resolvedAgentName;
+                item.dataset.assignedAgentKey = getAgentKey(resolvedAgentName);
                 item.dataset.assignedAgentEmail = agentEmail;
                 syncContactAssignmentBadge(item);
                 updateContactStateUI(item);
@@ -1514,6 +1628,96 @@ lucide.createIcons();
             } catch {}
             updateChatAssignmentState(normalizedWaId);
             scheduleCrmStateSave();
+        }
+
+        async function assignAllChatsToAgent(nextAgentName) {
+            const resolvedAgentName = normalizeAgentName(nextAgentName || agentName);
+            const currentRows = readManualContactsFromStorage();
+            const rowsByWaId = new Map();
+            currentRows.forEach((row) => {
+                const normalizedWaId = normalizeWaId(row?.waId || '');
+                if (!normalizedWaId) return;
+                rowsByWaId.set(normalizedWaId, {
+                    ...row,
+                    waId: normalizedWaId,
+                    assignedAgent: resolvedAgentName,
+                    assignedAgentKey: getAgentKey(resolvedAgentName),
+                    assignedAgentEmail: agentEmail
+                });
+            });
+            contactList.querySelectorAll('.contact-item').forEach((item) => {
+                const waId = normalizeWaId(item.dataset.waId || '');
+                if (!waId) return;
+                rowsByWaId.set(waId, {
+                    waId,
+                    profileName: item.dataset.profileName || item.querySelector('.contact-name')?.textContent?.trim() || waId,
+                    tag: item.dataset.tag || '',
+                    universityName: item.dataset.universityName || '',
+                    semester: item.dataset.semester || '',
+                    timezone: item.dataset.timezone || getAutoTimezone(),
+                    assignedAgent: resolvedAgentName,
+                    assignedAgentKey: getAgentKey(resolvedAgentName),
+                    assignedAgentEmail: agentEmail
+                });
+                item.dataset.assignedAgent = resolvedAgentName;
+                item.dataset.assignedAgentKey = getAgentKey(resolvedAgentName);
+                item.dataset.assignedAgentEmail = agentEmail;
+                syncContactAssignmentBadge(item);
+                updateContactStateUI(item);
+            });
+            writeManualContactsToStorage([...rowsByWaId.values()]);
+            if (activeWhatsappWaId) updateChatAssignmentState(activeWhatsappWaId);
+        }
+
+        function renderAssignAgentModal() {
+            if (!assignAgentList) return;
+            const roster = ensureAgentRoster();
+            assignAgentAdminPanel?.classList.toggle('hidden', !isAdminUser);
+            if (!roster.length) {
+                assignAgentList.innerHTML = '<div class="assign-agent-empty">No agents added yet.</div>';
+                return;
+            }
+            assignAgentList.innerHTML = roster.map((name) => {
+                const isSelected = getAgentKey(name) === getAgentKey(selectedAssignAgentName);
+                return `
+                    <button type="button" class="assign-agent-option${isSelected ? ' is-selected' : ''}" data-agent-name="${escapeHtml(name)}">
+                        <span class="assign-agent-option-copy">
+                            <span class="assign-agent-option-avatar">${escapeHtml((name.charAt(0) || 'A').toUpperCase())}</span>
+                            <span class="assign-agent-option-meta">
+                                <span class="assign-agent-option-name">${escapeHtml(name)}</span>
+                                <span class="assign-agent-option-subtitle">${getAgentKey(name) === getAgentKey(agentName) ? 'This device is using this name' : 'Click to select this agent'}</span>
+                            </span>
+                        </span>
+                        ${isAdminUser && roster.length > 1 ? `<span class="assign-agent-option-delete" data-delete-agent-name="${escapeHtml(name)}">Delete</span>` : ''}
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function openAssignAgentModal(mode = 'all', waId = '') {
+            if (!assignAgentModal) return;
+            assignAgentModalMode = mode === 'single' ? 'single' : 'all';
+            assignAgentModalWaId = normalizeWaId(waId);
+            selectedAssignAgentName = normalizeAgentName(getAssignedAgentMetaByWaId(assignAgentModalWaId).name || agentName);
+            if (assignAgentModalTitle) {
+                assignAgentModalTitle.textContent = assignAgentModalMode === 'all' ? 'Assign All Chats' : 'Assign Chat';
+            }
+            if (assignAgentModalSubtitle) {
+                assignAgentModalSubtitle.textContent = assignAgentModalMode === 'all'
+                    ? 'Choose one agent and assign every chat in one click.'
+                    : 'Choose one agent for this chat.';
+            }
+            if (confirmAssignAgentBtn) {
+                confirmAssignAgentBtn.textContent = assignAgentModalMode === 'all' ? 'Assign All Chats' : 'Assign Chat';
+            }
+            renderAssignAgentModal();
+            assignAgentModal.classList.remove('hidden');
+            document.body.classList.add('modal-open');
+        }
+
+        function closeAssignAgentModal() {
+            assignAgentModal?.classList.add('hidden');
+            document.body.classList.remove('modal-open');
         }
 
         function setClientDetailsEditMode(nextMode) {
@@ -1648,7 +1852,6 @@ lucide.createIcons();
             document.getElementById('odClientId').value = clientIdText;
             document.getElementById('odAssignedTo').value = card.dataset.assignedTo || '';
             document.getElementById('odCreatedBy').value = card.dataset.createdBy || card.dataset.assignedTo || '';
-            document.getElementById('odLabels').value = card.dataset.labels || '';
             document.getElementById('odActualDeadline').value = toDateTimeLocalValue(deadline);
             document.getElementById('odExpertDeadline').value = toDateTimeLocalValue(card.querySelector('.order-expert-deadline')?.dataset.baseValue || card.dataset.expertDeadline || '');
             applyExpertDeadlineConstraint();
@@ -1666,8 +1869,6 @@ lucide.createIcons();
             document.getElementById('odClientPaidCurrency').value = card.dataset.clientPaidCurrency || 'INR';
             document.getElementById('odClientPaidAmount').value = card.dataset.clientPaidAmount || '';
             document.getElementById('odPaymentStatusOverride').value = card.dataset.paymentStatusOverride || 'auto';
-            document.getElementById('odDescription').value = card.dataset.description || '';
-            document.getElementById('odTopic').value = card.dataset.topic || '';
             if (odExpertPaymentStatusInput) odExpertPaymentStatusInput.value = card.dataset.expertPaymentStatus || 'pending';
             document.getElementById('odSessionStart').value = card.dataset.sessionStart || '';
             document.getElementById('odSessionDuration').value = card.dataset.sessionDuration || '';
@@ -1814,6 +2015,7 @@ lucide.createIcons();
                 semester: typeof contact.semester === 'string' ? contact.semester : String(previous?.semester || ''),
                 timezone: typeof contact.timezone === 'string' ? contact.timezone : String(previous?.timezone || getAutoTimezone()),
                 assignedAgent: typeof contact.assignedAgent === 'string' ? contact.assignedAgent : String(previous?.assignedAgent || ''),
+                assignedAgentKey: typeof contact.assignedAgentKey === 'string' ? String(contact.assignedAgentKey || '').trim().toLowerCase() : String(previous?.assignedAgentKey || '').trim().toLowerCase(),
                 assignedAgentEmail: typeof contact.assignedAgentEmail === 'string' ? String(contact.assignedAgentEmail || '').trim().toLowerCase() : String(previous?.assignedAgentEmail || '').trim().toLowerCase()
             };
             if (existingIndex >= 0) {
@@ -2353,6 +2555,10 @@ lucide.createIcons();
                 statusEl.classList.add('text-blue-600', 'bg-blue-50');
                 return;
             }
+            if (normalized === 'in progress') {
+                statusEl.classList.add('text-indigo-700', 'bg-indigo-100');
+                return;
+            }
             if (normalized === 'on hold') {
                 statusEl.classList.add('text-yellow-800', 'bg-yellow-100');
                 return;
@@ -2369,7 +2575,7 @@ lucide.createIcons();
                 statusEl.classList.add('text-gray-700', 'bg-gray-200');
                 return;
             }
-            statusEl.classList.add('text-green-800', 'bg-green-100');
+            statusEl.classList.add('text-slate-700', 'bg-slate-100');
         }
 
         function applyCardTypeStyle(card, serviceTypeValue) {
@@ -2380,6 +2586,11 @@ lucide.createIcons();
             if (value.includes('live session')) {
                 card.dataset.serviceTone = 'live-session';
                 card.classList.add('bg-amber-50', 'border-amber-200');
+                return;
+            }
+            if (value.includes('tutoring class')) {
+                card.dataset.serviceTone = 'tutoring-class';
+                card.classList.add('bg-emerald-50', 'border-emerald-200');
                 return;
             }
             if (value.includes('assignment')) {
@@ -3276,7 +3487,7 @@ lucide.createIcons();
                 assignAgentBtn.addEventListener('click', async (e) => {
                     e.stopPropagation();
                     try {
-                        await assignContactToCurrentAgent(item.dataset.waId || '');
+                        openAssignAgentModal('single', item.dataset.waId || '');
                         openContactMenuId = '';
                         item.classList.remove('is-menu-open');
                         item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -3411,7 +3622,11 @@ lucide.createIcons();
         }
 
         function getActiveChatContactName() {
-            return (chatHeaderTitle?.textContent || '').trim() || normalizeWaId(activeWhatsappWaId);
+            const activeItem = activeWhatsappWaId
+                ? contactList.querySelector('.contact-item[data-wa-id="' + normalizeWaId(activeWhatsappWaId) + '"]')
+                : null;
+            const baseName = getContactBaseName(activeItem?.dataset?.profileName || '', activeWhatsappWaId || '');
+            return baseName || normalizeWaId(activeWhatsappWaId);
         }
 
         function applyChatInitiationPreview(previewText) {
@@ -3678,9 +3893,14 @@ lucide.createIcons();
 
         function renderWhatsappMessages(waId) {
             if (!chatMessages) return;
+            const previousWaId = lastRenderedChatWaId;
+            const wasNearBottom = (chatMessages.scrollHeight - (chatMessages.scrollTop + chatMessages.clientHeight)) < 96;
+            const previousOffsetFromBottom = Math.max(0, chatMessages.scrollHeight - chatMessages.scrollTop);
+            const shouldStickToBottom = !waId || previousWaId !== waId || wasNearBottom;
             if (!waId) {
                 chatMessages.classList.add('is-empty-chat');
                 chatMessages.innerHTML = '<div class="chat-empty-state" aria-hidden="true"></div>';
+                lastRenderedChatWaId = '';
                 updateChatWindowState('');
                 return;
             }
@@ -3689,6 +3909,7 @@ lucide.createIcons();
             chatMessages.innerHTML = '';
             if (!messages.length) {
                 chatMessages.innerHTML = '<p class="text-sm text-gray-500">No WhatsApp messages yet.</p>';
+                lastRenderedChatWaId = waId;
                 updateChatWindowState(waId);
                 return;
             }
@@ -3758,7 +3979,14 @@ lucide.createIcons();
                                 : `
                                     <div class="chat-bubble-file chat-bubble-document">
                                         <div class="chat-doc-card">
-                                            <div class="chat-doc-icon">${escapeHtml(String(messageType || 'file').slice(0, 3).toUpperCase())}</div>
+                                            <div class="chat-doc-icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" fill="none">
+                                                    <path d="M7 3.75h7.25L19.5 9v11.25A1.75 1.75 0 0 1 17.75 22h-10.5A1.75 1.75 0 0 1 5.5 20.25V5.5A1.75 1.75 0 0 1 7.25 3.75Z" fill="currentColor" opacity="0.14"></path>
+                                                    <path d="M14 3.75v4.5c0 .414.336.75.75.75h4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+                                                    <path d="M14.25 3.75H7.25A1.75 1.75 0 0 0 5.5 5.5v14.75A1.75 1.75 0 0 0 7.25 22h10.5a1.75 1.75 0 0 0 1.75-1.75V9l-5.25-5.25Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path>
+                                                    <path d="M8.75 13h7.5M8.75 16.25h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                                                </svg>
+                                            </div>
                                             <div class="chat-doc-copy">
                                                 <p class="chat-doc-type">${escapeHtml(messageType)}</p>
                                                 <p class="chat-doc-name">${attachmentName || 'Attachment'}</p>
@@ -3770,7 +3998,6 @@ lucide.createIcons();
                                                 <a href="${escapeHtml(attachmentUrl)}" target="_blank" rel="noopener noreferrer" download>Save</a>
                                             </div>
                                         ` : ''}
-                                        ${msg.text ? `<p class="text-xs text-gray-600">${escapeHtml(msg.text)}</p>` : ''}
                                     </div>
                                 `)
                     : (isTemplateMessage || isHandoffMessage)
@@ -3804,7 +4031,12 @@ lucide.createIcons();
                 `;
                 chatMessages.appendChild(wrap);
             });
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            lastRenderedChatWaId = waId;
+            if (shouldStickToBottom) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } else {
+                chatMessages.scrollTop = Math.max(0, chatMessages.scrollHeight - previousOffsetFromBottom);
+            }
             positionOpenMessageMenus();
             updateChatWindowState(waId);
         }
@@ -3845,11 +4077,12 @@ lucide.createIcons();
             const nextSemester = String(contact.semester || savedContact?.semester || existing?.dataset.semester || '');
             const nextTimezone = String(contact.timezone || savedContact?.timezone || existing?.dataset.timezone || getAutoTimezone());
             const nextAssignedAgent = String(contact.assignedAgent || savedContact?.assignedAgent || existing?.dataset.assignedAgent || '');
+            const nextAssignedAgentKey = String(contact.assignedAgentKey || savedContact?.assignedAgentKey || existing?.dataset.assignedAgentKey || '').trim().toLowerCase();
             const nextAssignedAgentEmail = String(contact.assignedAgentEmail || savedContact?.assignedAgentEmail || existing?.dataset.assignedAgentEmail || '').trim().toLowerCase();
             const contactId = getOrCreateWhatsappContactId(normalizedWaId);
             const linkedExpert = getExpertByWaId(normalizedWaId);
             const expertId = String(linkedExpert?.expertId || '');
-            saveManualContact({ waId: normalizedWaId, profileName, tag: nextTag, universityName: nextUniversityName, semester: nextSemester, timezone: nextTimezone, assignedAgent: nextAssignedAgent, assignedAgentEmail: nextAssignedAgentEmail });
+            saveManualContact({ waId: normalizedWaId, profileName, tag: nextTag, universityName: nextUniversityName, semester: nextSemester, timezone: nextTimezone, assignedAgent: nextAssignedAgent, assignedAgentKey: nextAssignedAgentKey, assignedAgentEmail: nextAssignedAgentEmail });
             if (!existing) {
                 const item = document.createElement('div');
                 item.className = 'contact-item p-3 border-b hover:bg-gray-50 cursor-pointer';
@@ -3864,6 +4097,7 @@ lucide.createIcons();
                 item.dataset.semester = nextSemester;
                 item.dataset.timezone = nextTimezone;
                 item.dataset.assignedAgent = nextAssignedAgent;
+                item.dataset.assignedAgentKey = nextAssignedAgentKey;
                 item.dataset.assignedAgentEmail = nextAssignedAgentEmail;
                 item.dataset.expertId = expertId;
                 item.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : 'human');
@@ -3879,7 +4113,6 @@ lucide.createIcons();
                                 <div class="contact-secondary-row">
                                     <p class="contact-meta text-xs text-gray-500">ID: ${escapeHtml(contactId)}</p>
                                     ${expertId ? `<span class="contact-expert-id-badge" title="Expert ID">${escapeHtml(expertId)}</span>` : ''}
-                                    ${nextAssignedAgent ? `<span class="contact-assigned-badge" title="Assigned to ${escapeHtml(nextAssignedAgent)}">${escapeHtml(nextAssignedAgent)}</span>` : ''}
                                     <span class="contact-label-badge hidden"></span>
                                     <span class="contact-pin-icon hidden" aria-hidden="true">
                                         <svg viewBox="0 0 16 16"><path d="M10.3 1.2c1.4 0 2.5 1.1 2.5 2.5 0 .6-.2 1.1-.5 1.5L10.8 7v2.2l1.1 1.1c.2.2.2.6 0 .8s-.6.2-.8 0L10 10H8.4l-3.8 3.8c-.2.2-.6.2-.8 0s-.2-.6 0-.8L7.6 9.2V7.6L6.5 6.5c-.2-.2-.2-.6 0-.8s.6-.2.8 0l1.1 1.1h2.2l1.5-1.5c.4-.4.5-.9.5-1.5 0-.8-.7-1.5-1.5-1.5S9.6 3 9.6 3.8c0 .2-.1.4-.3.5l-1.5 1c-.3.2-.6.1-.8-.2s-.1-.6.2-.8l1.2-.8c.2-1.3 1.3-2.3 2.6-2.3Z"></path><circle cx="10.3" cy="3.8" r="0.8"></circle></svg>
@@ -3931,6 +4164,7 @@ lucide.createIcons();
                 existing.dataset.semester = nextSemester;
                 existing.dataset.timezone = nextTimezone;
                 existing.dataset.assignedAgent = nextAssignedAgent;
+                existing.dataset.assignedAgentKey = nextAssignedAgentKey;
                 existing.dataset.assignedAgentEmail = nextAssignedAgentEmail;
                 existing.dataset.expertId = expertId;
                 existing.dataset.aiMode = String(contact.aiState?.aiEnabled ? 'ai' : existing.dataset.aiMode || 'human');
@@ -4225,6 +4459,7 @@ lucide.createIcons();
             initWhatsappPolling();
             initWhatsappDebugPolling();
             initWhatsappWindowTimer();
+            initCrmStatePolling();
         }
 
         contactItems.forEach((item, index) => {
@@ -4318,9 +4553,69 @@ lucide.createIcons();
         }
 
         assignActiveChatAgentBtn?.addEventListener('click', async () => {
-            if (!activeWhatsappWaId) return;
+            if (!contactList?.querySelector('.contact-item')) return;
+            openAssignAgentModal('all', activeWhatsappWaId);
+        });
+
+        closeAssignAgentModalBtn?.addEventListener('click', closeAssignAgentModal);
+        cancelAssignAgentModalBtn?.addEventListener('click', closeAssignAgentModal);
+        assignAgentModal?.addEventListener('click', (event) => {
+            if (event.target === assignAgentModal) {
+                closeAssignAgentModal();
+            }
+        });
+        assignAgentList?.addEventListener('click', (event) => {
+            const deleteTarget = event.target.closest('[data-delete-agent-name]');
+            if (deleteTarget) {
+                event.stopPropagation();
+                if (!isAdminUser) return;
+                const targetName = normalizeAgentName(deleteTarget.getAttribute('data-delete-agent-name') || '');
+                if (!targetName) return;
+                const nextRoster = ensureAgentRoster().filter((entry) => getAgentKey(entry) !== getAgentKey(targetName));
+                writeAgentRosterToStorage(nextRoster);
+                if (getAgentKey(selectedAssignAgentName) === getAgentKey(targetName)) {
+                    selectedAssignAgentName = nextRoster[0] || normalizeAgentName(storedAgentName || 'Agent');
+                }
+                if (getAgentKey(agentName) === getAgentKey(targetName)) {
+                    setCurrentAgentName(nextRoster[0] || normalizeAgentName(storedAgentName || 'Agent'));
+                }
+                renderAssignAgentModal();
+                return;
+            }
+            const option = event.target.closest('[data-agent-name]');
+            if (!option) return;
+            selectedAssignAgentName = normalizeAgentName(option.getAttribute('data-agent-name') || '');
+            renderAssignAgentModal();
+        });
+        addAssignAgentNameBtn?.addEventListener('click', () => {
+            if (!isAdminUser) return;
+            const nextName = normalizeAgentName(assignAgentNameInput?.value || '');
+            if (!nextName) {
+                alert('Enter an agent name first.');
+                return;
+            }
+            const nextRoster = ensureAgentRoster();
+            if (!nextRoster.some((entry) => getAgentKey(entry) === getAgentKey(nextName))) {
+                writeAgentRosterToStorage([...nextRoster, nextName]);
+            }
+            selectedAssignAgentName = nextName;
+            if (assignAgentNameInput) assignAgentNameInput.value = '';
+            renderAssignAgentModal();
+        });
+        confirmAssignAgentBtn?.addEventListener('click', async () => {
+            const nextName = normalizeAgentName(selectedAssignAgentName || agentName);
+            if (!nextName) {
+                alert('Select an agent first.');
+                return;
+            }
+            setCurrentAgentName(nextName);
             try {
-                await assignContactToCurrentAgent(activeWhatsappWaId);
+                if (assignAgentModalMode === 'single' && assignAgentModalWaId) {
+                    await assignContactToAgent(assignAgentModalWaId, nextName);
+                } else {
+                    await assignAllChatsToAgent(nextName);
+                }
+                closeAssignAgentModal();
             } catch (err) {
                 alert('Assign agent failed: ' + (err?.message || 'Unknown error'));
             }
@@ -4479,7 +4774,8 @@ lucide.createIcons();
             odExpertDeadlineInput.addEventListener('change', applyExpertDeadlineConstraint);
         }
         taskServiceType.addEventListener('change', function() {
-            const isLiveSession = this.value.toLowerCase() === 'live session';
+            const normalizedServiceType = this.value.toLowerCase();
+            const isLiveSession = normalizedServiceType === 'live session' || normalizedServiceType === 'tutoring class';
             liveSessionCreateFields.classList.toggle('hidden', !isLiveSession);
         });
 
@@ -4499,7 +4795,8 @@ lucide.createIcons();
             if (taskModalTitle) {
                 taskModalTitle.textContent = `Create Task (${agentName})`;
             }
-            const isLiveSession = taskServiceType.value.toLowerCase() === 'live session';
+            const normalizedServiceType = taskServiceType.value.toLowerCase();
+            const isLiveSession = normalizedServiceType === 'live session' || normalizedServiceType === 'tutoring class';
             liveSessionCreateFields.classList.toggle('hidden', !isLiveSession);
             if (!isLiveSession) {
                 taskSessionStart.value = '';
@@ -4523,7 +4820,8 @@ lucide.createIcons();
             const idMatch = clientText.match(/\((\d+)\)/);
             const clientId = idMatch ? idMatch[1] : '0000';
             const orderId = getNextOrderId(clientId);
-            const isLiveSession = serviceType.toLowerCase() === 'live session';
+            const normalizedServiceType = serviceType.toLowerCase();
+            const isLiveSession = normalizedServiceType === 'live session' || normalizedServiceType === 'tutoring class';
             const sessionStart = (taskSessionStart.value || '').trim();
             const sessionDuration = (taskSessionDuration.value || '').trim();
             const nowIso = new Date().toISOString();
@@ -4536,10 +4834,7 @@ lucide.createIcons();
             card.dataset.createdBy = agentName;
             card.dataset.createdAt = nowIso;
             card.dataset.updatedAt = nowIso;
-            card.dataset.labels = '';
-            card.dataset.description = '';
             card.dataset.instructions = '';
-            card.dataset.topic = '';
             card.dataset.activity = '';
             card.dataset.comments = '[]';
             card.dataset.notifiedExperts = '[]';
@@ -4659,7 +4954,6 @@ lucide.createIcons();
             const clientId = (activeOrderCard.dataset.clientId || '').trim();
             const assignedTo = document.getElementById('odAssignedTo').value.trim();
             const createdBy = (activeOrderCard.dataset.createdBy || agentName).trim();
-            const labels = document.getElementById('odLabels').value.trim();
             const actualDeadline = document.getElementById('odActualDeadline').value.trim();
             const expertDeadline = document.getElementById('odExpertDeadline').value.trim();
             if (actualDeadline && expertDeadline && expertDeadline > actualDeadline) {
@@ -4675,8 +4969,6 @@ lucide.createIcons();
             const clientPaidCurrency = document.getElementById('odClientPaidCurrency').value.trim() || 'INR';
             const clientPaidAmount = document.getElementById('odClientPaidAmount').value.trim();
             const paymentStatusOverride = document.getElementById('odPaymentStatusOverride').value.trim() || 'auto';
-            const description = document.getElementById('odDescription').value.trim();
-            const topic = document.getElementById('odTopic').value.trim();
             const expertPaymentStatus = (odExpertPaymentStatusInput?.value || 'pending').trim() || 'pending';
             const sessionStart = document.getElementById('odSessionStart').value.trim();
             const sessionDuration = document.getElementById('odSessionDuration').value.trim();
@@ -4685,8 +4977,6 @@ lucide.createIcons();
             activeOrderCard.dataset.serviceType = serviceType || title || '';
             syncOrderServiceTag(activeOrderCard);
             applyCardTypeStyle(activeOrderCard, activeOrderCard.dataset.serviceType);
-            const noteEl = activeOrderCard.querySelector('.order-client-note');
-            noteEl.textContent = description || noteEl.textContent;
             activeOrderCard.querySelector('.order-id').textContent = '#' + (orderId || clientId || 'NEW');
             activeOrderCard.querySelector('.order-amount').textContent = baseAmount;
             const expertPayEl = activeOrderCard.querySelector('.order-expert-pay');
@@ -4735,12 +5025,9 @@ lucide.createIcons();
             activeOrderCard.dataset.assignedTo = assignedTo;
             activeOrderCard.dataset.createdBy = createdBy || agentName;
             activeOrderCard.dataset.clientId = clientId;
-            activeOrderCard.dataset.labels = labels;
             activeOrderCard.dataset.expertDeadline = expertDeadline;
             activeOrderCard.dataset.expertPayout = expertPayout ? ('INR ' + expertPayout) : '';
             activeOrderCard.dataset.additionalCharges = additionalCharges;
-            activeOrderCard.dataset.description = description;
-            activeOrderCard.dataset.topic = topic;
             activeOrderCard.dataset.sessionStart = sessionStart;
             activeOrderCard.dataset.sessionDuration = sessionDuration;
             activeOrderCard.dataset.activity = activeOrderCard.dataset.activity || '';
@@ -5223,6 +5510,8 @@ lucide.createIcons();
             adminQuickMenu?.classList.add('hidden');
             adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
         });
+        ensureAgentRoster();
+        setCurrentAgentName(agentName, true);
         // Logout
         document.getElementById('logoutBtn').onclick = function() {
             localStorage.removeItem('crmAuthSession');
@@ -5230,6 +5519,7 @@ lucide.createIcons();
             localStorage.removeItem('crmAuthEmail');
             localStorage.removeItem('agentName');
             localStorage.removeItem('agentRole');
+            localStorage.removeItem(ACTIVE_AGENT_NAME_STORAGE_KEY);
             window.location.href = 'login.html';
         };
 
