@@ -89,6 +89,7 @@ const crmState = {
     orderListHtml: '',
     manualContacts: [],
     experts: [],
+    agentRoster: [],
     whatsappContactIdMap: {},
     whatsappReadState: {},
     whatsappContactIdSequence: 100100,
@@ -399,9 +400,6 @@ async function processIncomingMediaMessage({ waId, profileName, storedMessage, t
         if (attachmentUrl) {
             storedMessage.attachmentUrl = attachmentUrl;
         }
-        if (summaryText) {
-            storedMessage.text = summaryText;
-        }
         storedMessage.mimeType = effectiveMimeType;
         await persistMessageSnapshot(waId, storedMessage);
         broadcast({
@@ -424,7 +422,7 @@ async function processIncomingMediaMessage({ waId, profileName, storedMessage, t
         await handleAiAgentForIncomingMessage({
             waId,
             profileName,
-            text: storedMessage.text || `[${String(storedMessage.messageType || 'message')}]`,
+            text: summaryText || storedMessage.text || `[${String(storedMessage.messageType || 'message')}]`,
             timestamp,
             messageId: storedMessage.id || '',
             messageType: storedMessage.messageType || 'text'
@@ -520,10 +518,19 @@ function normalizeCrmStatePayload(payload = {}) {
                 tag: String(row.tag || ''),
                 universityName: String(row.universityName || ''),
                 semester: String(row.semester || ''),
-                timezone: String(row.timezone || '')
+                timezone: String(row.timezone || ''),
+                assignedAgent: String(row.assignedAgent || ''),
+                assignedAgentKey: String(row.assignedAgentKey || '').trim().toLowerCase(),
+                assignedAgentEmail: String(row.assignedAgentEmail || '').trim().toLowerCase()
             }))
             .filter((row) => row.waId)
         : crmState.manualContacts;
+    const nextAgentRoster = Array.isArray(payload.agentRoster)
+        ? payload.agentRoster
+            .map((entry) => String(entry || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .filter((entry, index, array) => array.findIndex((item) => item.toLowerCase() === entry.toLowerCase()) === index)
+        : crmState.agentRoster;
     const nextContactIdMap = payload.whatsappContactIdMap && typeof payload.whatsappContactIdMap === 'object'
         ? Object.fromEntries(
             Object.entries(payload.whatsappContactIdMap)
@@ -564,6 +571,7 @@ function normalizeCrmStatePayload(payload = {}) {
         orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
         manualContacts: nextManualContacts,
         experts: nextExperts,
+        agentRoster: nextAgentRoster,
         whatsappContactIdMap: nextContactIdMap,
         whatsappReadState: nextReadState,
         whatsappContactIdSequence: Number.isFinite(nextSequence) && nextSequence > 0
@@ -589,6 +597,7 @@ async function loadPersistedCrmState() {
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
+    crmState.agentRoster = nextState.agentRoster;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
@@ -617,6 +626,7 @@ async function persistCrmState(partialPayload = {}) {
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
+    crmState.agentRoster = nextState.agentRoster;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
@@ -2173,16 +2183,21 @@ app.get('/api/crm/state', async (_req, res) => {
     } catch (error) {
         console.warn('[storage] Failed to load CRM state:', error?.message || error);
     }
-    res.json({
-        ok: true,
+    const statePayload = {
         orderListHtml: crmState.orderListHtml,
         manualContacts: crmState.manualContacts,
         experts: crmState.experts,
+        agentRoster: crmState.agentRoster,
         whatsappContactIdMap: crmState.whatsappContactIdMap,
         whatsappReadState: crmState.whatsappReadState,
         whatsappContactIdSequence: crmState.whatsappContactIdSequence,
         expertIdSequence: crmState.expertIdSequence,
         updatedAt: crmState.updatedAt
+    };
+    res.json({
+        ok: true,
+        state: statePayload,
+        ...statePayload
     });
 });
 
@@ -2276,16 +2291,21 @@ app.delete('/api/whatsapp/contact/:waId', async (req, res) => {
 app.post('/api/crm/state', async (req, res) => {
     try {
         await persistCrmState(req.body || {});
-        return res.json({
-            ok: true,
+        const statePayload = {
             orderListHtml: crmState.orderListHtml,
             manualContacts: crmState.manualContacts,
             experts: crmState.experts,
+            agentRoster: crmState.agentRoster,
             whatsappContactIdMap: crmState.whatsappContactIdMap,
             whatsappReadState: crmState.whatsappReadState,
             whatsappContactIdSequence: crmState.whatsappContactIdSequence,
             expertIdSequence: crmState.expertIdSequence,
             updatedAt: crmState.updatedAt
+        };
+        return res.json({
+            ok: true,
+            state: statePayload,
+            ...statePayload
         });
     } catch (error) {
         lastFirebaseWriteError = error?.message || 'Failed to persist CRM state';
