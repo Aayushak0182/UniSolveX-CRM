@@ -373,10 +373,10 @@ html[data-theme="dark"] .brand-wordmark-accent {
   background-image:
     linear-gradient(var(--chat-wallpaper-overlay-top), var(--chat-wallpaper-overlay-bottom)),
     url("./whatsapp%20%20background.png");
-  background-size: cover;
-  background-repeat: no-repeat;
+  background-size: 360px auto;
+  background-repeat: repeat;
   background-attachment: local;
-  background-position: center center;
+  background-position: center top;
 }
 
 .chat-wallpaper.is-empty-chat {
@@ -386,7 +386,7 @@ html[data-theme="dark"] .brand-wordmark-accent {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
-  background-size: cover;
+  background-size: cover, contain;
   background-repeat: no-repeat;
   background-position: center center;
 }
@@ -395,12 +395,18 @@ html[data-theme="dark"] .chat-wallpaper {
   background-image:
     linear-gradient(var(--chat-wallpaper-overlay-top), var(--chat-wallpaper-overlay-bottom)),
     url("./whatsapp%20%20background.png");
+  background-size: 360px auto;
+  background-repeat: repeat;
+  background-position: center top;
 }
 
 html[data-theme="dark"] .chat-wallpaper.is-empty-chat {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
+  background-size: cover, contain;
+  background-repeat: no-repeat;
+  background-position: center center;
 }
 
 .chat-wallpaper > p {
@@ -617,18 +623,108 @@ html[data-theme="dark"] .chat-empty-state {
 
 .chat-doc-icon {
   flex: 0 0 auto;
-  min-width: 2.45rem;
-  height: 2.45rem;
-  padding: 0 0.35rem;
-  border-radius: 0.8rem;
+  width: 2.7rem;
+  height: 2.7rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  color: #ffffff;
-  font-size: 0.68rem;
+  color: #2563eb;
+}
+
+.chat-doc-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.assign-agent-list {
+  min-height: 12rem;
+}
+
+.assign-agent-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  background: #ffffff;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.assign-agent-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.assign-agent-option.is-selected {
+  border-color: rgba(79, 70, 229, 0.7);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.assign-agent-option-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.assign-agent-option-avatar {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.14), rgba(59, 130, 246, 0.24));
+  color: #4338ca;
+  font-size: 0.88rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+}
+
+.assign-agent-option-meta {
+  min-width: 0;
+}
+
+.assign-agent-option-name,
+.assign-agent-option-subtitle {
+  display: block;
+}
+
+.assign-agent-option-name {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.assign-agent-option-subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.73rem;
+  color: #6b7280;
+}
+
+.assign-agent-option-delete {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.assign-agent-empty {
+  display: grid;
+  place-items: center;
+  min-height: 11rem;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.86rem;
 }
 
 .chat-doc-copy {

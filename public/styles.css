@@ -386,7 +386,7 @@ html[data-theme="dark"] .brand-wordmark-accent {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
-  background-size: min(92%, 980px) auto;
+  background-size: cover, contain;
   background-repeat: no-repeat;
   background-position: center center;
 }
@@ -404,7 +404,7 @@ html[data-theme="dark"] .chat-wallpaper.is-empty-chat {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
-  background-size: min(90%, 980px) auto;
+  background-size: cover, contain;
   background-repeat: no-repeat;
   background-position: center center;
 }

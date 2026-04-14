@@ -374,7 +374,7 @@ async function processIncomingMediaMessage({ waId, profileName, storedMessage, t
             ? storedMessage.attachmentName
             : `media_${storedMessage.mediaId}.${inferFileExtension(effectiveMimeType, storedMessage.attachmentName)}`;
 
-        const [attachmentUrl, summaryText] = await Promise.all([
+        const [attachmentUrl, summary] = await Promise.all([
             uploadMediaBufferToStorage({
                 waId,
                 messageId: storedMessage.id,
@@ -393,9 +393,10 @@ async function processIncomingMediaMessage({ waId, profileName, storedMessage, t
                 messageType: storedMessage.messageType || ''
             }).catch((error) => {
                 console.warn('[ai-agent] Failed to summarize incoming media:', error?.message || error);
-                return '';
+                return null;
             })
         ]);
+        const summaryText = buildAttachmentSummaryText(summary);
 
         if (attachmentUrl) {
             storedMessage.attachmentUrl = attachmentUrl;
@@ -419,6 +420,23 @@ async function processIncomingMediaMessage({ waId, profileName, storedMessage, t
                 replyTo: storedMessage.replyTo || null
             }
         });
+        if (summaryText) {
+            const currentState = await ensureAiContactState(waId, profileName);
+            await persistAiContactState({
+                ...currentState,
+                profileName: profileName || currentState?.profileName || waId,
+                pendingTaskSummary: summary,
+                pendingTaskSummaryMessageId: storedMessage.id || '',
+                pendingTaskSummaryUpdatedAt: new Date().toISOString()
+            });
+            await sendWhatsappTextMessage({
+                waId,
+                text: summaryText,
+                senderType: 'ai',
+                route: 'ai-attachment-summary'
+            });
+            return;
+        }
         await handleAiAgentForIncomingMessage({
             waId,
             profileName,
@@ -782,38 +800,64 @@ function safeParseJsonObject(rawText) {
     }
 }
 
-function buildAttachmentSummaryText(summary) {
-    if (!summary || typeof summary !== 'object') return '';
-    const parts = [];
+function normalizeTaskSummary(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    const subjectTopic = String(summary.subjectTopic || summary.subject || '').trim();
     const task = String(summary.task || '').trim();
     const requirements = String(summary.requirements || '').trim();
     const deadline = String(summary.deadline || '').trim();
     const deliverables = Array.isArray(summary.deliverables)
-        ? summary.deliverables.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+        ? summary.deliverables.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
         : [];
-    if (task) parts.push(`Task: ${task}`);
-    if (requirements) parts.push(`Need to do: ${requirements}`);
-    if (deadline) parts.push(`Deadline: ${deadline}`);
-    if (deliverables.length) parts.push(`Deliverables: ${deliverables.join(', ')}`);
+    const summaryPoints = Array.isArray(summary.summaryPoints)
+        ? summary.summaryPoints.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+        : [];
+    const hasUsefulContent = Boolean(subjectTopic || task || requirements || deadline || deliverables.length || summaryPoints.length);
+    if (!hasUsefulContent) return null;
+    return {
+        subjectTopic,
+        task,
+        requirements,
+        deadline,
+        deliverables,
+        summaryPoints
+    };
+}
+
+function buildAttachmentSummaryText(summary) {
+    const normalized = normalizeTaskSummary(summary);
+    if (!normalized) return '';
+    const parts = ['Here is a short summary of your task:'];
+    if (normalized.subjectTopic) parts.push(`- Subject/Topic: ${normalized.subjectTopic}`);
+    if (normalized.task) parts.push(`- Work details: ${normalized.task}`);
+    if (normalized.requirements) parts.push(`- Requirements: ${normalized.requirements}`);
+    if (normalized.deadline) parts.push(`- Deadline: ${normalized.deadline}`);
+    if (normalized.deliverables.length) parts.push(`- Deliverables: ${normalized.deliverables.join(', ')}`);
+    normalized.summaryPoints.forEach((point) => {
+        parts.push(`- ${point}`);
+    });
+    parts.push('Please confirm if this looks correct. Once you confirm, I will create your task card.');
     return parts.join('\n').trim();
 }
 
 async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentName, messageType }) {
-    if (!aiAgentApiKey || !buffer?.length) return '';
+    if (!aiAgentApiKey || !buffer?.length) return null;
     if (buffer.length > aiAttachmentInlineMaxBytes) {
-        return '';
+        return null;
     }
 
     const prompt = [
         'Analyze this client attachment for a service CRM.',
         'Understand the work/assignment shown in the attachment and extract only what is clearly supported by the file.',
         'Return JSON only with this exact shape:',
-        '{"task":"","requirements":"","deadline":"","deliverables":[]}',
+        '{"subjectTopic":"","task":"","requirements":"","deadline":"","deliverables":[],"summaryPoints":[]}',
         'Rules:',
+        '- subjectTopic: concise subject and topic if visible, otherwise empty string.',
         '- task: one short sentence explaining what the client wants done.',
         '- requirements: short bullet-style sentence of what needs to be completed.',
         '- deadline: exact date/time if visible, otherwise empty string.',
         '- deliverables: short list like essay, ppt, code, report, answers, slides.',
+        '- summaryPoints: 2 to 4 short points summarizing the file contents or task expectations.',
         '- If the attachment is unreadable, return best effort with empty strings.',
         `Attachment name: ${attachmentName || ''}`,
         `Attachment type: ${messageType || mimeType || 'unknown'}`
@@ -848,7 +892,92 @@ async function summarizeIncomingMediaWithGemini({ buffer, mimeType, attachmentNa
         throw new Error(data?.error?.message || 'Gemini attachment summary failed');
     }
     const parsed = safeParseJsonObject(extractTextFromGeminiResponse(data));
-    return buildAttachmentSummaryText(parsed);
+    return normalizeTaskSummary(parsed);
+}
+
+function isGreetingIntent(text) {
+    const value = String(text || '').trim().toLowerCase();
+    if (!value) return false;
+    return /^(hi|hii|hiii|hello|hey|hy|yo|good morning|good afternoon|good evening)$/.test(value);
+}
+
+function isAssignmentHelpIntent(text) {
+    const value = String(text || '').trim().toLowerCase();
+    if (!value) return false;
+    return (
+        value.includes('assignment') ||
+        value.includes('project') ||
+        value.includes('homework') ||
+        value.includes('essay') ||
+        value.includes('report') ||
+        value.includes('presentation') ||
+        value.includes('ppt')
+    ) && (
+        value.includes('help') ||
+        value.includes('need') ||
+        value.includes('assist') ||
+        value.includes('support') ||
+        value.includes('can you do') ||
+        value.includes('can u do')
+    );
+}
+
+function isAffirmativeConfirmation(text) {
+    const value = String(text || '').trim().toLowerCase();
+    if (!value) return false;
+    return [
+        'yes', 'y', 'yeah', 'yep', 'ok', 'okay', 'confirm', 'confirmed', 'correct',
+        'this is correct', 'looks correct', 'go ahead', 'please proceed', 'proceed'
+    ].some((term) => value === term || value.includes(term));
+}
+
+function buildAssignmentIntakeReply() {
+    return [
+        'Yes, I can help you with that.',
+        'Please share these details so I can guide you properly:',
+        '- Deadline',
+        '- Subject and topic',
+        '- Full instructions or questions',
+        '- Word count / page count / slide count',
+        '- Required format or referencing style',
+        '- Any file, screenshot, or sample provided by your university'
+    ].join('\n');
+}
+
+function getDeterministicAiDecision({ latestMessageText, aiState }) {
+    const latest = String(latestMessageText || '').trim();
+    if (!latest) return null;
+    if (aiState?.pendingTaskSummary && isAffirmativeConfirmation(latest)) {
+        return {
+            shouldReply: true,
+            replyText: 'Thank you for confirming. I have noted the task details and your task card is being created.',
+            handoffToHuman: false,
+            handoffReason: '',
+            intent: 'task_confirmation',
+            confidence: 0.99
+        };
+    }
+    if (isGreetingIntent(latest)) {
+        return {
+            shouldReply: true,
+            replyText: 'Hello! How may I help you today?',
+            handoffToHuman: false,
+            handoffReason: '',
+            intent: 'greeting',
+            confidence: 0.99
+        };
+    }
+    if (isAssignmentHelpIntent(latest)) {
+        return {
+            shouldReply: true,
+            replyText: buildAssignmentIntakeReply(),
+            handoffToHuman: false,
+            handoffReason: '',
+            intent: 'assignment_help',
+            confidence: 0.98
+        };
+    }
+    return null;
 }
 
 function isPricingIntent(text) {
@@ -881,6 +1010,11 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
     }
     if (aiAgentProvider !== 'gemini') {
         throw new Error(`Unsupported AI agent provider "${aiAgentProvider}". Set AI_AGENT_PROVIDER=gemini.`);
+    }
+
+    const deterministicDecision = getDeterministicAiDecision({ latestMessageText, aiState });
+    if (deterministicDecision) {
+        return deterministicDecision;
     }
 
     const transcript = buildAiConversationTranscript(waId);
@@ -918,6 +1052,10 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
         '- If the request is understandable and safe, reply directly instead of handing off.',
         '- Do not mention internal policies or JSON.',
         '- Prefer asking one useful follow-up question at a time when more detail is needed.',
+        '- If the latest message is only a greeting like hi/hello/hey, reply exactly: "Hello! How may I help you today?"',
+        '- If the client says they need help with an assignment, project, homework, essay, report, or presentation, reply clearly and ask for details in point-wise bullets.',
+        '- If the client has shared a file and the conversation includes extracted task details, respond with a short point-wise summary and ask for confirmation.',
+        '- If the client confirms a previously shared summary, acknowledge the confirmation and say the task card is being created.',
         '',
         `Client name: ${profileName || waId}`,
         `Latest client message: ${latestMessageText || ''}`,
@@ -1446,7 +1584,9 @@ async function handleAiAgentForIncomingMessage({ waId, profileName, text, timest
                 ...nextState,
                 aiReplyCount: Number(nextState.aiReplyCount || 0) + 1,
                 lastAiReplyAt: new Date().toISOString(),
-                lastIntent: decision.intent || nextState.lastIntent
+                lastIntent: decision.intent || nextState.lastIntent,
+                pendingTaskSummary: decision.intent === 'task_confirmation' ? nextState.pendingTaskSummary : (nextState.pendingTaskSummary || null),
+                pendingTaskConfirmedAt: decision.intent === 'task_confirmation' ? new Date().toISOString() : (nextState.pendingTaskConfirmedAt || '')
             });
         });
     aiReplyQueueByWaId.set(normalizedWaId, nextJob.finally(() => {

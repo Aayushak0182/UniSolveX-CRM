@@ -531,6 +531,21 @@ lucide.createIcons();
             };
         }
 
+        function hasMeaningfulCrmState(state) {
+            if (!state || typeof state !== 'object') return false;
+            const orderHtml = typeof state.orderListHtml === 'string' ? state.orderListHtml : '';
+            const hasOrders = /order-card/.test(orderHtml);
+            const hasManualContacts = Array.isArray(state.manualContacts) && state.manualContacts.length > 0;
+            const hasExperts = Array.isArray(state.experts) && state.experts.length > 0;
+            const hasContactMap = state.whatsappContactIdMap && Object.keys(state.whatsappContactIdMap).length > 0;
+            const hasReadState = state.whatsappReadState && Object.keys(state.whatsappReadState).length > 0;
+            return Boolean(hasOrders || hasManualContacts || hasExperts || hasContactMap || hasReadState);
+        }
+
+        function hasMeaningfulLocalCrmState() {
+            return hasMeaningfulCrmState(getCurrentCrmStatePayload());
+        }
+
         async function persistCrmStateToBackend() {
             const payload = getCurrentCrmStatePayload();
             try {
@@ -598,6 +613,10 @@ lucide.createIcons();
                 Number.isFinite(Number(state.whatsappContactIdSequence));
 
             if (!hasRemoteState) return false;
+            if (!hasMeaningfulCrmState(state) && hasMeaningfulLocalCrmState()) {
+                console.warn('Skipping empty CRM snapshot so local cards and contacts are preserved.');
+                return false;
+            }
 
             if (includeOrders) {
                 localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
@@ -1039,7 +1058,6 @@ lucide.createIcons();
                     : activeOrderTab === 'expert'
                         ? Boolean(assignedTo) && assignedTo !== mineIdentity
                         : (createdBy === mineIdentity || assignedTo === mineIdentity || !assignedTo);
-                const matchesFreshDeadline = activeOrderTab === 'all' || !due || due.getTime() >= now.getTime();
 
                 let matchesWindow = true;
                 if (windowMs > 0) {
@@ -1058,7 +1076,7 @@ lucide.createIcons();
                     }
                 }
 
-                card.style.display = matchesQuery && matchesWindow && matchesTab && matchesFreshDeadline ? '' : 'none';
+                card.style.display = matchesQuery && matchesWindow && matchesTab ? '' : 'none';
             });
         }
 
@@ -4060,6 +4078,7 @@ lucide.createIcons();
             if (activeWhatsappWaId === waId) {
                 renderWhatsappMessages(waId);
             }
+            maybeCreateAiTaskCard(waId);
         }
 
         function upsertWhatsappContact(contact, markUnread) {
@@ -4229,6 +4248,7 @@ lucide.createIcons();
                 text: payload.text || '',
                 timestamp: payload.timestamp || new Date().toISOString(),
                 direction: payload.direction || 'incoming',
+                senderType: payload.senderType || '',
                 messageType: payload.messageType || 'text',
                 attachmentName: payload.attachmentName || '',
                 attachmentUrl: payload.attachmentUrl || '',
@@ -4321,6 +4341,7 @@ lucide.createIcons();
                             text: m.text || '',
                             timestamp: m.timestamp || new Date().toISOString(),
                             direction: m.direction || 'incoming',
+                            senderType: m.senderType || '',
                             messageType: m.messageType || 'text',
                             attachmentName: m.attachmentName || '',
                             attachmentUrl: m.attachmentUrl || '',
@@ -4348,6 +4369,7 @@ lucide.createIcons();
                         const nextUnreadCount = activeWhatsappWaId === waId ? 0 : getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []);
                         setContactUnreadCount(item, nextUnreadCount);
                     }
+                    maybeCreateAiTaskCard(waId);
                 });
                 scheduleContactOrderRefresh();
                 if (activeWhatsappWaId) {
@@ -4786,6 +4808,206 @@ lucide.createIcons();
                 alert('Admin: Create Agent ID');
             };
         }
+
+        function createOrderCard(options = {}) {
+            const clientText = String(options.clientText || '').trim();
+            const serviceType = String(options.serviceType || 'Assignment Help').trim() || 'Assignment Help';
+            const title = String(options.title || serviceType || 'Untitled Task').trim();
+            const clientId = String(options.clientId || '0000').replace(/[^\d]/g, '') || '0000';
+            const orderId = String(options.orderId || getNextOrderId(clientId)).trim();
+            const status = String(options.status || 'New').trim() || 'New';
+            const assignedTo = String(options.assignedTo || agentName).trim();
+            const createdBy = String(options.createdBy || agentName).trim();
+            const actualDeadline = String(options.actualDeadline || '').trim();
+            const expertDeadline = String(options.expertDeadline || '').trim();
+            const expertPayout = String(options.expertPayout || 'INR 0').trim() || 'INR 0';
+            const baseAmount = String(options.baseAmount || 'TBD').trim() || 'TBD';
+            const sessionStart = String(options.sessionStart || '').trim();
+            const sessionDuration = String(options.sessionDuration || '').trim();
+            const sourceWaId = normalizeWaId(options.sourceWaId || '');
+            const aiSummaryMessageId = String(options.aiSummaryMessageId || '').trim();
+            const aiConfirmedMessageId = String(options.aiConfirmedMessageId || '').trim();
+            const nowIso = new Date().toISOString();
+            const normalizedServiceType = serviceType.toLowerCase();
+            const isLiveSession = normalizedServiceType === 'live session' || normalizedServiceType === 'tutoring class';
+
+            const card = document.createElement('div');
+            card.className = 'order-card p-3 rounded-lg border shadow-sm';
+            card.dataset.serviceType = serviceType;
+            card.dataset.clientId = clientId;
+            card.dataset.assignedTo = assignedTo;
+            card.dataset.createdBy = createdBy;
+            card.dataset.createdAt = nowIso;
+            card.dataset.updatedAt = nowIso;
+            card.dataset.instructions = '';
+            card.dataset.activity = '';
+            card.dataset.comments = '[]';
+            card.dataset.notifiedExperts = '[]';
+            card.dataset.expertDeadline = expertDeadline;
+            card.dataset.expertPayout = expertPayout;
+            card.dataset.expertPaymentStatus = 'pending';
+            card.dataset.clientPaidCurrency = 'INR';
+            card.dataset.clientPaidAmount = '';
+            card.dataset.paymentStatusOverride = 'auto';
+            card.dataset.sessionStart = sessionStart;
+            card.dataset.sessionDuration = sessionDuration;
+            if (sourceWaId) card.dataset.sourceWaId = sourceWaId;
+            if (aiSummaryMessageId) card.dataset.aiSummaryMessageId = aiSummaryMessageId;
+            if (aiConfirmedMessageId) card.dataset.aiConfirmedMessageId = aiConfirmedMessageId;
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-2">
+                    <span class="order-detail-label text-[10px] font-bold uppercase px-2 py-0.5 rounded">Work Details</span>
+                    <div class="flex items-center gap-2">
+                        <span class="order-created-by-top text-[10px] text-gray-500 font-medium">By - ${escapeHtml(createdBy)}</span>
+                        <span class="order-id text-[10px] text-gray-400 font-mono">#${escapeHtml(orderId)}</span>
+                        <button type="button" class="open-expert-notify-btn p-1 rounded" title="Notify Experts">
+                            <i data-lucide="bell" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
+                            <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+                <h4 class="order-title text-sm font-bold text-gray-800">${escapeHtml(title || serviceType || 'Untitled Task')}</h4>
+                <div class="order-title-row flex items-center gap-2">
+                    <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">${escapeHtml(serviceType)}</span>
+                    <span class="order-status text-[10px] font-bold uppercase px-2 py-0.5 rounded">${escapeHtml(status)}</span>
+                </div>
+                <p class="order-client-note text-[11px] text-gray-500 mt-0.5">${escapeHtml(clientText.replace(/\(\d+\)/, '').trim())}</p>
+                <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
+                    <p>C.A - <span class="order-amount font-semibold text-indigo-600">${escapeHtml(baseAmount)}</span><span class="order-payment-indicator hidden ml-1"></span></p>
+                    <p>E.P - <span class="order-expert-pay font-semibold text-violet-700">${escapeHtml(expertPayout)}</span><span class="order-expert-payment-indicator hidden ml-1"></span></p>
+                    <p>C.D - <span class="order-deadline deadline-muted font-medium">${escapeHtml(formatDateTimeForCard(actualDeadline || ''))}</span></p>
+                    <p>E.D - <span class="order-expert-deadline deadline-muted font-medium">${escapeHtml(formatDateTimeForCard(expertDeadline || ''))}</span></p>
+                </div>
+                <p class="order-session mt-1 text-[11px] text-gray-600 ${isLiveSession ? '' : 'hidden'}">S.T - ${escapeHtml(sessionStart || 'TBD')} | Dur - ${escapeHtml(sessionDuration || 'TBD')}m</p>
+                <p class="order-comment hidden mt-1 text-[11px] text-gray-700 border-t pt-1">Note: </p>
+            `;
+            card.querySelector('.order-deadline').dataset.baseValue = formatDateTimeForCard(actualDeadline || '');
+            card.querySelector('.order-expert-deadline').dataset.baseValue = formatDateTimeForCard(expertDeadline || '');
+            syncOrderServiceTag(card);
+            syncOrderPaymentIndicator(card);
+            syncOrderExpertPaymentIndicator(card);
+            syncOrderExpertSummary(card);
+            syncOrderNotifyButton(card);
+            applyCardTypeStyle(card, serviceType);
+            applyDeadlineStyles(card);
+            applyOrderStatusStyle(card.querySelector('.order-status'), status);
+            return card;
+        }
+
+        function parseAiTaskSummaryMessage(message) {
+            const text = String(message?.text || '').trim();
+            if (!text || !/short summary of your task/i.test(text)) return null;
+            const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+            const summary = {
+                summaryMessageId: String(message?.id || '').trim(),
+                subjectTopic: '',
+                workDetails: '',
+                requirements: '',
+                deadline: '',
+                deliverables: '',
+                bulletPoints: []
+            };
+            lines.forEach((line) => {
+                const clean = line.replace(/^-+\s*/, '').trim();
+                if (/^subject\/topic\s*:/i.test(clean)) summary.subjectTopic = clean.split(/:/).slice(1).join(':').trim();
+                else if (/^work details\s*:/i.test(clean)) summary.workDetails = clean.split(/:/).slice(1).join(':').trim();
+                else if (/^requirements\s*:/i.test(clean)) summary.requirements = clean.split(/:/).slice(1).join(':').trim();
+                else if (/^deadline\s*:/i.test(clean)) summary.deadline = clean.split(/:/).slice(1).join(':').trim();
+                else if (/^deliverables\s*:/i.test(clean)) summary.deliverables = clean.split(/:/).slice(1).join(':').trim();
+                else if (line.startsWith('-')) summary.bulletPoints.push(clean);
+            });
+            if (!summary.subjectTopic && !summary.workDetails && !summary.requirements && !summary.deadline && !summary.deliverables) {
+                return null;
+            }
+            return summary;
+        }
+
+        function isPositiveTaskConfirmation(text) {
+            const normalized = String(text || '').trim().toLowerCase();
+            if (!normalized) return false;
+            return [
+                'yes', 'y', 'yeah', 'yep', 'ok', 'okay', 'confirm', 'confirmed', 'correct',
+                'looks correct', 'this is correct', 'go ahead', 'please proceed', 'proceed'
+            ].some((term) => normalized === term || normalized.includes(term));
+        }
+
+        function maybeCreateAiTaskCard(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return false;
+            const thread = Array.isArray(whatsappMessagesByContact[normalizedWaId]) ? whatsappMessagesByContact[normalizedWaId] : [];
+            if (!thread.length) return false;
+
+            let summaryMessage = null;
+            let confirmationMessage = null;
+            for (let index = thread.length - 1; index >= 0; index -= 1) {
+                const message = thread[index];
+                if (!confirmationMessage && message?.direction === 'incoming' && isPositiveTaskConfirmation(message?.text || '')) {
+                    confirmationMessage = message;
+                    continue;
+                }
+                if (!summaryMessage && message?.direction === 'outgoing' && String(message?.senderType || '').toLowerCase() === 'ai') {
+                    const parsed = parseAiTaskSummaryMessage(message);
+                    if (parsed) {
+                        summaryMessage = { message, parsed, index };
+                        break;
+                    }
+                }
+            }
+            if (!summaryMessage || !confirmationMessage) return false;
+            if (thread.indexOf(confirmationMessage) < summaryMessage.index) return false;
+            if (!summaryMessage.parsed.summaryMessageId) return false;
+            if (Array.from(orderList.querySelectorAll('.order-card')).some((card) => String(card.dataset.aiSummaryMessageId || '') === summaryMessage.parsed.summaryMessageId)) {
+                return false;
+            }
+
+            const contactItem = contactList.querySelector(`.contact-item[data-wa-id="${normalizedWaId}"]`);
+            const clientId = String(contactItem?.dataset?.contactId || getOrCreateWhatsappContactId(normalizedWaId));
+            const clientName = contactItem
+                ? getContactDisplayName(contactItem.dataset.profileName || normalizedWaId, normalizedWaId)
+                : normalizedWaId;
+            const title = summaryMessage.parsed.workDetails || summaryMessage.parsed.subjectTopic || 'Assignment Help';
+            const serviceType = /session|class|tutor/i.test(title) ? 'Tutoring class' : 'Assignment Help';
+            const card = createOrderCard({
+                clientText: `${clientName} (${clientId})`,
+                clientId,
+                serviceType,
+                title,
+                status: 'New',
+                createdBy: 'AI Agent',
+                assignedTo: agentName,
+                actualDeadline: summaryMessage.parsed.deadline,
+                expertDeadline: summaryMessage.parsed.deadline,
+                sourceWaId: normalizedWaId,
+                aiSummaryMessageId: summaryMessage.parsed.summaryMessageId,
+                aiConfirmedMessageId: String(confirmationMessage.id || '').trim()
+            });
+            const requirementsText = [
+                summaryMessage.parsed.subjectTopic ? `Subject/Topic: ${summaryMessage.parsed.subjectTopic}` : '',
+                summaryMessage.parsed.requirements ? `Requirements: ${summaryMessage.parsed.requirements}` : '',
+                summaryMessage.parsed.deliverables ? `Deliverables: ${summaryMessage.parsed.deliverables}` : ''
+            ].filter(Boolean).join(' | ');
+            card.dataset.instructions = requirementsText;
+            if (requirementsText) {
+                card.dataset.comments = JSON.stringify([{
+                    agent: 'AI Agent',
+                    text: requirementsText,
+                    createdAt: new Date().toISOString()
+                }]);
+                const commentEl = card.querySelector('.order-comment');
+                if (commentEl) {
+                    commentEl.textContent = 'Note: AI Agent - ' + requirementsText;
+                    commentEl.classList.remove('hidden');
+                }
+            }
+            orderList.prepend(card);
+            lucide.createIcons();
+            persistOrderListToStorage();
+            applyOrderSearchFilter();
+            return true;
+        }
+
         // Create Task Modal Open
         document.getElementById('createTaskBtn').onclick = function() {
             const activeContactItem = activeWhatsappWaId
@@ -4824,65 +5046,18 @@ lucide.createIcons();
             const isLiveSession = normalizedServiceType === 'live session' || normalizedServiceType === 'tutoring class';
             const sessionStart = (taskSessionStart.value || '').trim();
             const sessionDuration = (taskSessionDuration.value || '').trim();
-            const nowIso = new Date().toISOString();
-
-            const card = document.createElement('div');
-            card.className = 'order-card p-3 rounded-lg border shadow-sm';
-            card.dataset.serviceType = serviceType;
-            card.dataset.clientId = clientId;
-            card.dataset.assignedTo = agentName;
-            card.dataset.createdBy = agentName;
-            card.dataset.createdAt = nowIso;
-            card.dataset.updatedAt = nowIso;
-            card.dataset.instructions = '';
-            card.dataset.activity = '';
-            card.dataset.comments = '[]';
-            card.dataset.notifiedExperts = '[]';
-            card.dataset.expertDeadline = '';
-            card.dataset.expertPayout = 'INR 0';
-            card.dataset.expertPaymentStatus = 'pending';
-            card.dataset.clientPaidCurrency = 'INR';
-            card.dataset.clientPaidAmount = '';
-            card.dataset.paymentStatusOverride = 'auto';
-            card.dataset.sessionStart = sessionStart;
-            card.dataset.sessionDuration = sessionDuration;
-            card.innerHTML = `
-                <div class="flex justify-between items-start mb-2">
-                    <span class="order-detail-label text-[10px] font-bold uppercase px-2 py-0.5 rounded">Work Details</span>
-                    <div class="flex items-center gap-2">
-                        <span class="order-created-by-top text-[10px] text-gray-500 font-medium">By - ${agentName}</span>
-                        <span class="order-id text-[10px] text-gray-400 font-mono">#${orderId}</span>
-                        <button type="button" class="open-expert-notify-btn p-1 rounded" title="Notify Experts">
-                            <i data-lucide="bell" class="w-3.5 h-3.5"></i>
-                        </button>
-                        <button class="open-order-details-btn p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100" title="Open Details">
-                            <i data-lucide="square-arrow-out-up-right" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </div>
-                </div>
-                <h4 class="order-title text-sm font-bold text-gray-800">${title || serviceType || 'Untitled Task'}</h4>
-                <div class="order-title-row flex items-center gap-2">
-                    <span class="order-service-tag text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">${serviceType}</span>
-                    <span class="order-status text-[10px] font-bold uppercase px-2 py-0.5 rounded">New</span>
-                </div>
-                <p class="order-client-note text-[11px] text-gray-500 mt-0.5">${clientText.replace(/\(\d+\)/, '').trim()}</p>
-                <div class="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-600">
-                    <p>C.A - <span class="order-amount font-semibold text-indigo-600">TBD</span><span class="order-payment-indicator hidden ml-1"></span></p>
-                    <p>E.P - <span class="order-expert-pay font-semibold text-violet-700">INR 0</span><span class="order-expert-payment-indicator hidden ml-1"></span></p>
-                    <p>C.D - <span class="order-deadline deadline-muted font-medium"></span></p>
-                    <p>E.D - <span class="order-expert-deadline deadline-muted font-medium"></span></p>
-                </div>
-                <p class="order-session mt-1 text-[11px] text-gray-600 ${isLiveSession ? '' : 'hidden'}">S.T - ${sessionStart || 'TBD'} | Dur - ${sessionDuration || 'TBD'}m</p>
-                <p class="order-comment hidden mt-1 text-[11px] text-gray-700 border-t pt-1">Note: </p>
-            `;
-            syncOrderServiceTag(card);
-            syncOrderPaymentIndicator(card);
-            syncOrderExpertPaymentIndicator(card);
-            syncOrderExpertSummary(card);
-            syncOrderNotifyButton(card);
-            applyCardTypeStyle(card, serviceType);
-            applyDeadlineStyles(card);
-            applyOrderStatusStyle(card.querySelector('.order-status'), 'New');
+            const card = createOrderCard({
+                clientText,
+                clientId,
+                serviceType,
+                title,
+                orderId,
+                status: 'New',
+                createdBy: agentName,
+                assignedTo: agentName,
+                sessionStart: isLiveSession ? sessionStart : '',
+                sessionDuration: isLiveSession ? sessionDuration : ''
+            });
             orderList.prepend(card);
             lucide.createIcons();
             persistOrderListToStorage();
