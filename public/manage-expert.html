@@ -14,6 +14,15 @@
             --brand: #7c3aed;
             --brand-soft: rgba(124,58,237,0.08);
         }
+        html[data-theme="dark"] {
+            --bg: #0f172a;
+            --panel: rgba(15, 23, 42, 0.92);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --border: rgba(148,163,184,0.25);
+            --brand: #93c5fd;
+            --brand-soft: rgba(96,165,250,0.12);
+        }
         * { box-sizing: border-box; }
         body {
             margin: 0;
@@ -155,15 +164,42 @@
     </div>
 
     <script>
-        const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
+        const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
         const orderId = new URLSearchParams(window.location.search).get('orderId') || '';
         const clientId = new URLSearchParams(window.location.search).get('clientId') || '';
 
-        function getContainer() {
-            const html = localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '';
+        function applyTheme() {
+            const theme = localStorage.getItem(APP_THEME_STORAGE_KEY) || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+
+        function getBackendBase() {
+            const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin) {
+                return 'http://localhost:3001';
+            }
+            return 'https://unisolvex-crm-backend-ra02.onrender.com';
+        }
+
+        function getContainerFromHtml(html) {
             const container = document.createElement('div');
-            container.innerHTML = html;
+            container.innerHTML = String(html || '');
             return container;
+        }
+
+        async function getContainer() {
+            let response;
+            try {
+                response = await fetch(getBackendBase() + '/api/crm/state');
+            } catch (error) {
+                throw new Error('Backend unreachable. Cloud expert data is required.');
+            }
+            const data = await response.json().catch(() => ({}));
+            const state = data?.state && typeof data.state === 'object' ? data.state : data;
+            if (!response.ok || typeof state?.orderListHtml !== 'string') {
+                throw new Error('Expert data could not be loaded from cloud.');
+            }
+            return getContainerFromHtml(state.orderListHtml);
         }
 
         function findCard(container) {
@@ -191,50 +227,78 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function render() {
-            const container = getContainer();
-            const card = findCard(container);
-            const meta = document.getElementById('pageMeta');
-            if (!card) {
-                if (meta) meta.textContent = 'Order not found.';
-                return;
+        async function saveContainer(container) {
+            let response;
+            try {
+                response = await fetch(getBackendBase() + '/api/crm/state', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderListHtml: container.innerHTML })
+                });
+            } catch (error) {
+                throw new Error('Backend unreachable. Changes were not saved to cloud.');
             }
-            const title = card.querySelector('.order-title')?.textContent?.trim() || 'Order';
-            meta.textContent = `${title} | Order #${orderId} | Client ${clientId || card.dataset.clientId || '-'}`;
-            document.getElementById('assignedExpertName').value = card.dataset.assignedExpertName || '';
-            document.getElementById('assignedExpertId').value = card.dataset.assignedExpertId || '';
-            document.getElementById('expertPayout').value = card.dataset.expertPayout || '';
-            document.getElementById('expertPaymentStatus').value = card.dataset.expertPaymentStatus || 'pending';
-            document.getElementById('interestedExperts').value = parseJsonArray(card.dataset.interestedExperts || '[]').join('\n');
-            document.getElementById('expertNotes').value = card.dataset.expertNotes || '';
-            const notified = parseJsonArray(card.dataset.notifiedExperts || '[]');
-            document.getElementById('notifiedExpertsList').innerHTML = notified.length
-                ? notified.map((item) => `<span class="chip">${escapeHtml(item)}</span>`).join('')
-                : '<span class="meta">No experts notified yet.</span>';
+            if (!response.ok) {
+                throw new Error('Cloud save failed.');
+            }
         }
 
-        document.getElementById('saveBtn').addEventListener('click', function() {
-            const container = getContainer();
-            const card = findCard(container);
-            if (!card) return;
-            card.dataset.assignedExpertName = String(document.getElementById('assignedExpertName').value || '').trim();
-            card.dataset.assignedExpertId = String(document.getElementById('assignedExpertId').value || '').trim();
-            card.dataset.expertPayout = String(document.getElementById('expertPayout').value || '').trim();
-            card.dataset.expertPaymentStatus = String(document.getElementById('expertPaymentStatus').value || 'pending').trim() || 'pending';
-            card.dataset.interestedExperts = JSON.stringify(
-                String(document.getElementById('interestedExperts').value || '')
-                    .split(/\r?\n|,/)
-                    .map((item) => item.trim())
-                    .filter(Boolean)
-            );
-            card.dataset.expertNotes = String(document.getElementById('expertNotes').value || '').trim();
-            const payoutEl = card.querySelector('.order-expert-pay');
-            if (payoutEl) payoutEl.textContent = card.dataset.expertPayout || 'INR 0';
-            localStorage.setItem(ORDER_LIST_STORAGE_KEY, container.innerHTML);
-            document.getElementById('saveStatus').textContent = 'Saved successfully.';
+        async function render() {
+            applyTheme();
+            const meta = document.getElementById('pageMeta');
+            try {
+                const container = await getContainer();
+                const card = findCard(container);
+                if (!card) {
+                    if (meta) meta.textContent = 'Order not found.';
+                    return;
+                }
+                const title = card.querySelector('.order-title')?.textContent?.trim() || 'Order';
+                meta.textContent = `${title} | Order #${orderId} | Client ${clientId || card.dataset.clientId || '-'}`;
+                document.getElementById('assignedExpertName').value = card.dataset.assignedExpertName || '';
+                document.getElementById('assignedExpertId').value = card.dataset.assignedExpertId || '';
+                document.getElementById('expertPayout').value = card.dataset.expertPayout || '';
+                document.getElementById('expertPaymentStatus').value = card.dataset.expertPaymentStatus || 'pending';
+                document.getElementById('interestedExperts').value = parseJsonArray(card.dataset.interestedExperts || '[]').join('\n');
+                document.getElementById('expertNotes').value = card.dataset.expertNotes || '';
+                const notified = parseJsonArray(card.dataset.notifiedExperts || '[]');
+                document.getElementById('notifiedExpertsList').innerHTML = notified.length
+                    ? notified.map((item) => `<span class="chip">${escapeHtml(item)}</span>`).join('')
+                    : '<span class="meta">No experts notified yet.</span>';
+                document.getElementById('saveStatus').textContent = '';
+            } catch (error) {
+                if (meta) meta.textContent = error?.message || 'Backend unreachable.';
+                document.getElementById('saveStatus').textContent = error?.message || 'Backend unreachable.';
+            }
+        }
+
+        document.getElementById('saveBtn').addEventListener('click', async function() {
+            try {
+                const container = await getContainer();
+                const card = findCard(container);
+                if (!card) return;
+                card.dataset.assignedExpertName = String(document.getElementById('assignedExpertName').value || '').trim();
+                card.dataset.assignedExpertId = String(document.getElementById('assignedExpertId').value || '').trim();
+                card.dataset.expertPayout = String(document.getElementById('expertPayout').value || '').trim();
+                card.dataset.expertPaymentStatus = String(document.getElementById('expertPaymentStatus').value || 'pending').trim() || 'pending';
+                card.dataset.interestedExperts = JSON.stringify(
+                    String(document.getElementById('interestedExperts').value || '')
+                        .split(/\r?\n|,/)
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                );
+                card.dataset.expertNotes = String(document.getElementById('expertNotes').value || '').trim();
+                const payoutEl = card.querySelector('.order-expert-pay');
+                if (payoutEl) payoutEl.textContent = card.dataset.expertPayout || 'INR 0';
+                await saveContainer(container);
+                document.getElementById('saveStatus').textContent = 'Saved successfully.';
+            } catch (error) {
+                document.getElementById('saveStatus').textContent = error?.message || 'Save failed.';
+                alert(error?.message || 'Save failed.');
+            }
         });
 
-        render();
+        void render();
     </script>
 </body>
 </html>

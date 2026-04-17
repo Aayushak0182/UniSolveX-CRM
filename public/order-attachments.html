@@ -174,7 +174,86 @@
             font-size: 13px;
             font-weight: 700;
         }
+        .upload-queue {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            width: min(320px, calc(100vw - 32px));
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .upload-queue-item {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+        }
+        .upload-queue-name {
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .upload-queue-meta {
+            margin-top: 4px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .upload-progress-bar {
+            margin-top: 8px;
+            width: 100%;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.18);
+            overflow: hidden;
+        }
+        .upload-progress-bar > span {
+            display: block;
+            height: 100%;
+            background: var(--brand);
+            width: 0%;
+            transition: width 140ms ease;
+        }
         a { color: var(--brand); }
+        .file-item-main {
+            min-width: 0;
+            flex: 1;
+        }
+        .file-item-title {
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .file-item-link {
+            display: block;
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-item-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .icon-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+        .icon-btn svg {
+            width: 16px;
+            height: 16px;
+        }
         @media (max-width: 980px) {
             .layout { grid-template-columns: 1fr; }
         }
@@ -182,6 +261,7 @@
 </head>
 <body>
     <div class="wrap">
+        <div id="uploadQueue" class="upload-queue"></div>
         <div class="panel hero">
             <div class="hero-top">
                 <div>
@@ -218,7 +298,6 @@
     </div>
 
     <script>
-        const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
         const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
         const orderId = new URLSearchParams(window.location.search).get('orderId') || '';
         const clientId = new URLSearchParams(window.location.search).get('clientId') || '';
@@ -249,10 +328,9 @@
             }
         }
 
-        function getContainer() {
-            const html = localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '';
+        function getContainerFromHtml(html) {
             const container = document.createElement('div');
-            container.innerHTML = html;
+            container.innerHTML = String(html || '');
             return container;
         }
 
@@ -271,9 +349,40 @@
             return 'https://unisolvex-crm-backend-ra02.onrender.com';
         }
 
-        function saveContainer(container, message) {
-            localStorage.setItem(ORDER_LIST_STORAGE_KEY, container.innerHTML);
+        async function fetchCrmStateHtml() {
+            let response;
+            try {
+                response = await fetch(getBackendBase() + '/api/crm/state');
+            } catch (error) {
+                throw new Error('Backend unreachable. Cloud storage is required.');
+            }
+            const data = await response.json().catch(() => ({}));
+            const state = data?.state && typeof data.state === 'object' ? data.state : data;
+            if (!response.ok || typeof state?.orderListHtml !== 'string') {
+                throw new Error('CRM state could not be loaded from cloud.');
+            }
+            return state.orderListHtml;
+        }
+
+        async function loadContainer() {
+            return getContainerFromHtml(await fetchCrmStateHtml());
+        }
+
+        async function saveContainer(container, message) {
             document.getElementById('saveStatus').textContent = message || 'Saved successfully.';
+            let response;
+            try {
+                response = await fetch(getBackendBase() + '/api/crm/state', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderListHtml: container.innerHTML })
+                });
+            } catch (error) {
+                throw new Error('Backend unreachable. Changes were not saved to cloud.');
+            }
+            if (!response.ok) {
+                throw new Error('Cloud save failed.');
+            }
         }
 
         function getCurrentPathKey() {
@@ -375,8 +484,7 @@
             });
         }
 
-        function renderFolderTree() {
-            const container = getContainer();
+        function renderFolderTree(container) {
             const card = findCard(container);
             const tree = document.getElementById('folderTree');
             const topLevel = card ? getChildFolders(card, '') : [];
@@ -398,8 +506,7 @@
             });
         }
 
-        function renderFileList() {
-            const container = getContainer();
+        function renderFileList(container) {
             const card = findCard(container);
             const target = document.getElementById('fileList');
             const pathKey = getCurrentPathKey();
@@ -422,11 +529,18 @@
             `).join('');
             const fileHtml = items.map((item, index) => `
                 <div class="file-item">
-                    <div>
-                        <strong>${escapeHtml(item.name || 'Untitled')}</strong>
-                        <small><a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url || 'Open file')}</a></small>
+                    <div class="file-item-main">
+                        <div class="file-item-title">${escapeHtml(item.name || 'Untitled')}</div>
+                        <a class="file-item-link" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(item.url || '')}">${escapeHtml(item.url || 'Open file')}</a>
                     </div>
-                    <button class="btn btn-soft" type="button" onclick="removeItem(${index})">Remove</button>
+                    <div class="file-item-actions">
+                        <a class="btn btn-soft icon-btn" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" title="Download">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                        </a>
+                        <button class="btn btn-soft icon-btn" type="button" onclick="removeItem(${index})" title="Remove">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>
+                        </button>
+                    </div>
                 </div>
             `).join('');
 
@@ -442,8 +556,7 @@
             }
         }
 
-        function refreshMeta() {
-            const container = getContainer();
+        function refreshMeta(container) {
             const card = findCard(container);
             const meta = document.getElementById('pageMeta');
             if (!card) {
@@ -471,6 +584,73 @@
             });
         }
 
+        function ensureUploadQueueItem(fileName) {
+            const queue = document.getElementById('uploadQueue');
+            const id = 'upload-' + Math.random().toString(36).slice(2);
+            const item = document.createElement('div');
+            item.className = 'upload-queue-item';
+            item.dataset.uploadId = id;
+            item.innerHTML = `
+                <div class="upload-queue-name">${escapeHtml(fileName)}</div>
+                <div class="upload-queue-meta">Preparing upload...</div>
+                <div class="upload-progress-bar"><span></span></div>
+            `;
+            queue.appendChild(item);
+            return item;
+        }
+
+        function updateUploadQueueItem(item, percent, metaText) {
+            if (!item) return;
+            item.querySelector('.upload-queue-meta').textContent = metaText;
+            item.querySelector('.upload-progress-bar > span').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        }
+
+        function finalizeUploadQueueItem(item, successText) {
+            if (!item) return;
+            updateUploadQueueItem(item, 100, successText);
+            setTimeout(() => item.remove(), 1800);
+        }
+
+        async function uploadFileWithProgress({ file, pathKey, card }) {
+            const item = ensureUploadQueueItem(file.name);
+            const dataUrl = await fileToDataUrl(file);
+            return await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', getBackendBase() + '/api/order-files/upload');
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.upload.onprogress = (event) => {
+                    if (!event.lengthComputable) return;
+                    const percent = Math.round((event.loaded / event.total) * 100);
+                    updateUploadQueueItem(item, percent, `${percent}% uploaded`);
+                };
+                xhr.onload = () => {
+                    try {
+                        const payload = JSON.parse(xhr.responseText || '{}');
+                        if (xhr.status < 200 || xhr.status >= 300 || !payload?.ok || !payload?.url) {
+                            throw new Error(payload?.error || 'File upload failed');
+                        }
+                        finalizeUploadQueueItem(item, 'Upload complete');
+                        resolve(payload);
+                    } catch (error) {
+                        item.remove();
+                        reject(error);
+                    }
+                };
+                xhr.onerror = () => {
+                    item.remove();
+                    reject(new Error('Upload failed'));
+                };
+                updateUploadQueueItem(item, 8, 'Uploading...');
+                xhr.send(JSON.stringify({
+                    orderId,
+                    clientId: clientId || card.dataset.clientId || '',
+                    folderName: pathKey.replace(/\//g, '-'),
+                    fileName: file.name,
+                    dataUrl
+                }));
+            });
+        }
+
         async function uploadFiles(files) {
             const pathKey = getCurrentPathKey();
             if (!isUploadAllowed(pathKey)) {
@@ -480,29 +660,14 @@
             const selectedFiles = Array.from(files || []);
             if (!selectedFiles.length) return;
 
-            const container = getContainer();
+            const container = await loadContainer();
             const card = findCard(container);
             if (!card) return;
             const rows = getFilesForPath(card, pathKey);
             document.getElementById('saveStatus').textContent = 'Uploading...';
 
             for (const file of selectedFiles) {
-                const dataUrl = await fileToDataUrl(file);
-                const response = await fetch(getBackendBase() + '/api/order-files/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        orderId,
-                        clientId: clientId || card.dataset.clientId || '',
-                        folderName: pathKey.replace(/\//g, '-'),
-                        fileName: file.name,
-                        dataUrl
-                    })
-                });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok || !payload?.ok || !payload?.url) {
-                    throw new Error(payload?.error || 'File upload failed');
-                }
+                const payload = await uploadFileWithProgress({ file, pathKey, card });
                 rows.unshift({
                     name: payload.fileName || file.name,
                     url: payload.url,
@@ -518,14 +683,14 @@
                 const remaining = getCustomFiles(card).filter((row) => row.path !== pathKey);
                 setCustomFiles(card, [...rows.map((row) => ({ ...row, path: pathKey })), ...remaining]);
             }
-            saveContainer(container, 'Files uploaded successfully.');
-            renderFileList();
+            await saveContainer(container, 'Files uploaded successfully.');
+            await render();
         }
 
-        function removeItem(index) {
+        async function removeItem(index) {
             const pathKey = getCurrentPathKey();
             if (!isUploadAllowed(pathKey)) return;
-            const container = getContainer();
+            const container = await loadContainer();
             const card = findCard(container);
             if (!card) return;
             const rows = getFilesForPath(card, pathKey).filter((_, itemIndex) => itemIndex !== index);
@@ -537,12 +702,12 @@
                 const remaining = getCustomFiles(card).filter((row) => row.path !== pathKey);
                 setCustomFiles(card, [...rows.map((row) => ({ ...row, path: pathKey })), ...remaining]);
             }
-            saveContainer(container, 'File removed successfully.');
-            renderFileList();
+            await saveContainer(container, 'File removed successfully.');
+            await render();
         }
 
-        function createNewFolder() {
-            const container = getContainer();
+        async function createNewFolder() {
+            const container = await loadContainer();
             const card = findCard(container);
             if (!card) return;
             const currentPath = getCurrentPathKey();
@@ -566,25 +731,42 @@
                 path: nextPath
             });
             setCustomFolders(card, rows);
-            saveContainer(container, 'Folder created successfully.');
+            await saveContainer(container, 'Folder created successfully.');
             setActivePath(nextPath.split('/').filter(Boolean));
         }
 
-        function render() {
+        async function render() {
             applyTheme();
-            refreshMeta();
-            buildBreadcrumbs();
-            renderFolderTree();
-            renderFileList();
-            updateUploadHint();
+            try {
+                const container = await loadContainer();
+                refreshMeta(container);
+                buildBreadcrumbs();
+                renderFolderTree(container);
+                renderFileList(container);
+                updateUploadHint();
+                document.getElementById('saveStatus').textContent = '';
+            } catch (error) {
+                document.getElementById('saveStatus').textContent = error?.message || 'Backend unreachable.';
+                document.getElementById('folderTree').innerHTML = '<div class="empty">Backend unreachable. Cloud files cannot be loaded.</div>';
+                document.getElementById('fileList').innerHTML = '<div class="empty">Backend unreachable. Cloud files cannot be loaded.</div>';
+                updateUploadHint();
+            }
         }
 
-        document.getElementById('newFolderBtn').addEventListener('click', createNewFolder);
+        document.getElementById('newFolderBtn').addEventListener('click', async () => {
+            try {
+                await createNewFolder();
+            } catch (error) {
+                document.getElementById('saveStatus').textContent = error?.message || 'Folder could not be created.';
+                alert(error?.message || 'Folder could not be created.');
+            }
+        });
 
         fileInput.addEventListener('change', async function() {
             try {
                 await uploadFiles(this.files || []);
             } catch (error) {
+                document.getElementById('saveStatus').textContent = error?.message || 'Upload failed';
                 alert(error?.message || 'Upload failed');
             } finally {
                 this.value = '';
@@ -607,12 +789,13 @@
             try {
                 await uploadFiles(event.dataTransfer?.files || []);
             } catch (error) {
+                document.getElementById('saveStatus').textContent = error?.message || 'Upload failed';
                 alert(error?.message || 'Upload failed');
             }
         });
 
         window.removeItem = removeItem;
-        render();
+        void render();
     </script>
 </body>
 </html>

@@ -255,6 +255,40 @@ lucide.createIcons();
         let crmStatePendingSave = false;
         let crmStatePollingTimer = null;
         let lastCrmStateUpdatedAt = '';
+        const cloudCrmState = {
+            orderListHtml: '',
+            manualContacts: [],
+            experts: [],
+            agentRoster: [],
+            whatsappContactIdMap: {},
+            whatsappReadState: {},
+            whatsappContactIdSequence: 100100,
+            expertIdSequence: 1
+        };
+        let crmBackendErrorShown = false;
+
+        function setCrmBackendStatus(message, level) {
+            setWhatsappStatus(message, level);
+            if (level === 'err') {
+                setWhatsappLastEvent(message);
+            }
+        }
+
+        function handleRequiredCrmBackendError(context, err, options = {}) {
+            const detail = err?.message ? String(err.message) : 'Unknown backend error';
+            const message = `CRM backend unreachable: ${context}. ${detail}`;
+            console.warn(message);
+            setCrmBackendStatus(message, 'err');
+            if (options.alertUser && !crmBackendErrorShown) {
+                crmBackendErrorShown = true;
+                window.alert('CRM backend unreachable. Cloud sync is required, so local fallback is disabled until the backend is available.');
+            }
+            return false;
+        }
+
+        function clearCrmBackendErrorState() {
+            crmBackendErrorShown = false;
+        }
 
         function normalizeAgentName(value) {
             return String(value || '').replace(/\s+/g, ' ').trim();
@@ -266,9 +300,7 @@ lucide.createIcons();
 
         function readAgentRosterFromStorage() {
             try {
-                const raw = localStorage.getItem(AGENT_ROSTER_STORAGE_KEY);
-                const parsed = raw ? JSON.parse(raw) : [];
-                const source = Array.isArray(parsed) ? parsed : [];
+                const source = Array.isArray(cloudCrmState.agentRoster) ? cloudCrmState.agentRoster : [];
                 const next = [];
                 const seen = new Set();
                 source.forEach((entry) => {
@@ -301,7 +333,7 @@ lucide.createIcons();
             if (!next.length) {
                 next.push(normalizeAgentName(storedAgentName || agentName || 'Agent'));
             }
-            localStorage.setItem(AGENT_ROSTER_STORAGE_KEY, JSON.stringify(next));
+            cloudCrmState.agentRoster = next.slice();
             if (!skipRemote) scheduleCrmStateSave();
             return next;
         }
@@ -518,35 +550,35 @@ lucide.createIcons();
         }
 
         function restoreOrderListFromStorage() {
-            const storedOrderListHtml = localStorage.getItem(ORDER_LIST_STORAGE_KEY);
+            const storedOrderListHtml = typeof cloudCrmState.orderListHtml === 'string' ? cloudCrmState.orderListHtml : '';
             if (!storedOrderListHtml) return;
             orderList.innerHTML = storedOrderListHtml;
             lucide.createIcons();
         }
 
         function persistOrderListToStorage(skipRemote) {
-            localStorage.setItem(ORDER_LIST_STORAGE_KEY, orderList.innerHTML);
+            cloudCrmState.orderListHtml = orderList.innerHTML;
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
         }
 
         function getStoredWhatsappContactIdSequence() {
-            return Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
+            return Number(cloudCrmState.whatsappContactIdSequence || '100100');
         }
 
         function setWhatsappContactIdSequenceInStorage(value, skipRemote) {
-            localStorage.setItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY, String(value));
+            cloudCrmState.whatsappContactIdSequence = Number.isFinite(Number(value)) ? Number(value) : 100100;
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
         }
 
         function getCurrentCrmStatePayload() {
-            const rawSequence = Number(localStorage.getItem(WHATSAPP_CONTACT_ID_SEQUENCE_KEY) || '100100');
-            const rawExpertSequence = Number(localStorage.getItem(EXPERT_ID_SEQUENCE_KEY) || '1');
+            const rawSequence = Number(cloudCrmState.whatsappContactIdSequence || '100100');
+            const rawExpertSequence = Number(cloudCrmState.expertIdSequence || '1');
             return {
-                orderListHtml: localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '',
+                orderListHtml: orderList.innerHTML || '',
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
                 agentRoster: readAgentRosterFromStorage(),
@@ -587,8 +619,9 @@ lucide.createIcons();
                 }
                 const data = await res.json().catch(() => ({}));
                 lastCrmStateUpdatedAt = String(data?.state?.updatedAt || data?.updatedAt || lastCrmStateUpdatedAt || '');
+                clearCrmBackendErrorState();
             } catch (err) {
-                console.warn('Failed to persist CRM state to backend:', err);
+                handleRequiredCrmBackendError('save failed', err);
             }
         }
 
@@ -640,39 +673,30 @@ lucide.createIcons();
 
             if (!hasRemoteState) return false;
             if (!hasMeaningfulCrmState(state) && hasMeaningfulLocalCrmState()) {
-                console.warn('Skipping empty CRM snapshot so local cards and contacts are preserved.');
+                console.warn('Skipping empty CRM snapshot so current cloud-backed data is preserved.');
                 return false;
             }
 
-            if (includeOrders) {
-                localStorage.setItem(ORDER_LIST_STORAGE_KEY, typeof state.orderListHtml === 'string' ? state.orderListHtml : '');
-            }
-            localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.manualContacts) ? state.manualContacts : []));
-            localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(Array.isArray(state.experts) ? state.experts : []));
-            writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
-            localStorage.setItem(
-                WHATSAPP_CONTACT_ID_MAP_KEY,
-                JSON.stringify(state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {})
-            );
-            localStorage.setItem(
-                WHATSAPP_READ_STATE_STORAGE_KEY,
-                JSON.stringify(state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {})
-            );
-            setWhatsappContactIdSequenceInStorage(
-                Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
-                true
-            );
-            localStorage.setItem(
-                EXPERT_ID_SEQUENCE_KEY,
-                String(Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1)
-            );
-            experts = readExpertsFromStorage();
-
+            cloudCrmState.orderListHtml = typeof state.orderListHtml === 'string' ? state.orderListHtml : '';
+            cloudCrmState.manualContacts = Array.isArray(state.manualContacts) ? state.manualContacts : [];
+            cloudCrmState.experts = Array.isArray(state.experts) ? state.experts : [];
+            cloudCrmState.whatsappContactIdMap = state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {};
+            cloudCrmState.whatsappReadState = state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {};
+            cloudCrmState.whatsappContactIdSequence = Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100;
+            cloudCrmState.expertIdSequence = Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1;
             if (includeOrders) {
                 orderList.innerHTML = '';
                 restoreOrderListFromStorage();
                 rehydrateOrderCardsFromDom();
             }
+            writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
+            setWhatsappContactIdSequenceInStorage(
+                Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
+                true
+            );
+            cloudCrmState.expertIdSequence = Number.isFinite(Number(state.expertIdSequence)) ? Number(state.expertIdSequence) : 1;
+            experts = readExpertsFromStorage();
+
             restoreManualContactsFromStorage();
             setCurrentAgentName(localStorage.getItem(ACTIVE_AGENT_NAME_STORAGE_KEY) || agentName, true);
             if (activeWhatsappWaId) {
@@ -680,6 +704,7 @@ lucide.createIcons();
             }
             scheduleContactOrderRefresh();
             lastCrmStateUpdatedAt = String(state.updatedAt || lastCrmStateUpdatedAt || '');
+            clearCrmBackendErrorState();
             return true;
         }
 
@@ -695,8 +720,7 @@ lucide.createIcons();
                     : (data && typeof data === 'object' ? data : null);
                 return applyCrmStateSnapshot(state, { includeOrders: true });
             } catch (err) {
-                console.warn('Failed to hydrate CRM state from backend:', err);
-                return false;
+                return handleRequiredCrmBackendError('initial load failed', err, { alertUser: true });
             }
         }
 
@@ -718,8 +742,7 @@ lucide.createIcons();
                 }
                 return applyCrmStateSnapshot(state, { includeOrders: !(isEditingTask || isCreatingTask) });
             } catch (err) {
-                console.warn('Background CRM sync failed:', err);
-                return false;
+                return handleRequiredCrmBackendError('background sync failed', err);
             }
         }
 
@@ -825,7 +848,7 @@ lucide.createIcons();
         }
 
         function getStoredOrderCardsSnapshot() {
-            const html = localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '';
+            const html = typeof cloudCrmState.orderListHtml === 'string' ? cloudCrmState.orderListHtml : '';
             const temp = document.createElement('div');
             temp.innerHTML = html;
             return Array.from(temp.querySelectorAll('.order-card')).filter((card) => !card.classList.contains('expert-card'));
@@ -1793,10 +1816,7 @@ lucide.createIcons();
 
         function readManualContactsFromStorage() {
             try {
-                const raw = localStorage.getItem(MANUAL_CONTACTS_STORAGE_KEY);
-                if (!raw) return [];
-                const parsed = JSON.parse(raw);
-                return Array.isArray(parsed) ? parsed : [];
+                return Array.isArray(cloudCrmState.manualContacts) ? cloudCrmState.manualContacts : [];
             } catch {
                 return [];
             }
@@ -1804,15 +1824,10 @@ lucide.createIcons();
 
         function readExpertsFromStorage() {
             try {
-                const raw = localStorage.getItem(EXPERTS_STORAGE_KEY);
-                if (!raw) return [];
-                const parsed = JSON.parse(raw);
-                const rows = Array.isArray(parsed) ? parsed : [];
+                const rows = Array.isArray(cloudCrmState.experts) ? cloudCrmState.experts : [];
                 const normalized = dedupeExperts(rows);
-                if (JSON.stringify(rows) !== JSON.stringify(normalized)) {
-                    localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(normalized));
-                }
-                localStorage.setItem(EXPERT_ID_SEQUENCE_KEY, String(getNextExpertSequenceFromRows(normalized)));
+                cloudCrmState.experts = normalized;
+                cloudCrmState.expertIdSequence = getNextExpertSequenceFromRows(normalized);
                 return normalized;
             } catch {
                 return [];
@@ -1934,7 +1949,7 @@ lucide.createIcons();
         }
 
         function writeExpertsToStorage(rows, skipRemote) {
-            localStorage.setItem(EXPERTS_STORAGE_KEY, JSON.stringify(rows));
+            cloudCrmState.experts = Array.isArray(rows) ? rows : [];
             experts = Array.isArray(rows) ? rows : [];
             if (!skipRemote) {
                 scheduleCrmStateSave();
@@ -1942,11 +1957,11 @@ lucide.createIcons();
         }
 
         function getStoredExpertIdSequence() {
-            return Math.max(1, Number(localStorage.getItem(EXPERT_ID_SEQUENCE_KEY) || '1') || 1);
+            return Math.max(1, Number(cloudCrmState.expertIdSequence || '1') || 1);
         }
 
         function setExpertIdSequenceInStorage(value, skipRemote) {
-            localStorage.setItem(EXPERT_ID_SEQUENCE_KEY, String(Math.max(1, Number(value || 1) || 1)));
+            cloudCrmState.expertIdSequence = Math.max(1, Number(value || 1) || 1);
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -2040,7 +2055,7 @@ lucide.createIcons();
         }
 
         function writeManualContactsToStorage(rows, skipRemote) {
-            localStorage.setItem(MANUAL_CONTACTS_STORAGE_KEY, JSON.stringify(rows));
+            cloudCrmState.manualContacts = Array.isArray(rows) ? rows : [];
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -2084,7 +2099,7 @@ lucide.createIcons();
             try {
                 const idMap = readWhatsappContactIdMapFromStorage();
                 delete idMap[normalizedWaId];
-                localStorage.setItem(WHATSAPP_CONTACT_ID_MAP_KEY, JSON.stringify(idMap));
+                writeWhatsappContactIdMapToStorage(idMap, true);
             } catch {}
 
             try {
@@ -2463,10 +2478,9 @@ lucide.createIcons();
 
         function readWhatsappContactIdMapFromStorage() {
             try {
-                const raw = localStorage.getItem(WHATSAPP_CONTACT_ID_MAP_KEY);
-                if (!raw) return {};
-                const parsed = JSON.parse(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
+                return cloudCrmState.whatsappContactIdMap && typeof cloudCrmState.whatsappContactIdMap === 'object'
+                    ? cloudCrmState.whatsappContactIdMap
+                    : {};
             } catch {
                 return {};
             }
@@ -2474,17 +2488,16 @@ lucide.createIcons();
 
         function readWhatsappReadStateFromStorage() {
             try {
-                const raw = localStorage.getItem(WHATSAPP_READ_STATE_STORAGE_KEY);
-                if (!raw) return {};
-                const parsed = JSON.parse(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
+                return cloudCrmState.whatsappReadState && typeof cloudCrmState.whatsappReadState === 'object'
+                    ? cloudCrmState.whatsappReadState
+                    : {};
             } catch {
                 return {};
             }
         }
 
         function writeWhatsappReadStateToStorage(map, skipRemote) {
-            localStorage.setItem(WHATSAPP_READ_STATE_STORAGE_KEY, JSON.stringify(map || {}));
+            cloudCrmState.whatsappReadState = map && typeof map === 'object' ? map : {};
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -2529,7 +2542,7 @@ lucide.createIcons();
         }
 
         function writeWhatsappContactIdMapToStorage(map, skipRemote) {
-            localStorage.setItem(WHATSAPP_CONTACT_ID_MAP_KEY, JSON.stringify(map));
+            cloudCrmState.whatsappContactIdMap = map && typeof map === 'object' ? map : {};
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -4815,9 +4828,7 @@ lucide.createIcons();
         initWhatsappSync();
         void hydrateCrmStateFromBackend().then((loaded) => {
             crmStateHydrationComplete = true;
-            if (!loaded) {
-                scheduleCrmStateSave();
-            } else if (crmStatePendingSave) {
+            if (loaded && crmStatePendingSave) {
                 crmStatePendingSave = false;
                 scheduleCrmStateSave();
             }
@@ -5080,11 +5091,6 @@ lucide.createIcons();
             });
         }
         applyContactFilter();
-        restoreOrderListFromStorage();
-        rehydrateOrderCardsFromDom();
-        if (!localStorage.getItem(ORDER_LIST_STORAGE_KEY)) {
-            persistOrderListToStorage();
-        }
         orderSearch.addEventListener('input', applyOrderSearchFilter);
         if (orderDeliveryWindow) {
             orderDeliveryWindow.addEventListener('change', applyOrderSearchFilter);
