@@ -318,6 +318,66 @@ async function uploadMediaBufferToStorage(args) {
     return await uploadMediaBufferToFirebaseStorage(args);
 }
 
+async function uploadOrderFileBufferToCloudinary({ orderId, clientId, folderName, fileName, mimeType, buffer }) {
+    if (!isCloudinaryConfigured() || !buffer?.length) return '';
+    const safeOrderId = sanitizeFileSegment(orderId || 'order');
+    const safeClientId = sanitizeFileSegment(clientId || 'client');
+    const safeFolder = sanitizeFileSegment(folderName || 'files');
+    const safeName = sanitizeFileSegment(fileName || `file_${Date.now()}.${inferFileExtension(mimeType, fileName)}`);
+    const publicId = `${cloudinaryFolder}/order-files/${safeClientId}/${safeOrderId}/${safeFolder}/${Date.now()}_${safeName}`;
+    const uploadTimestamp = Math.floor(Date.now() / 1000);
+    const signature = buildCloudinarySignature({
+        public_id: publicId,
+        timestamp: uploadTimestamp
+    });
+    const dataUrl = `data:${mimeType || 'application/octet-stream'};base64,${buffer.toString('base64')}`;
+    const form = new FormData();
+    form.append('file', dataUrl);
+    form.append('api_key', cloudinaryApiKey);
+    form.append('timestamp', String(uploadTimestamp));
+    form.append('public_id', publicId);
+    form.append('signature', signature);
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/auto/upload`, {
+        method: 'POST',
+        body: form
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.secure_url) {
+        throw new Error(payload?.error?.message || 'Cloudinary order file upload failed');
+    }
+    return String(payload.secure_url || '');
+}
+
+async function uploadOrderFileBufferToFirebaseStorage({ orderId, clientId, folderName, fileName, mimeType, buffer }) {
+    if (!initFirebasePersistence() || !firebaseBucket || !buffer?.length) return '';
+    const safeOrderId = sanitizeFileSegment(orderId || 'order');
+    const safeClientId = sanitizeFileSegment(clientId || 'client');
+    const safeFolder = sanitizeFileSegment(folderName || 'files');
+    const safeName = sanitizeFileSegment(fileName || `file_${Date.now()}.${inferFileExtension(mimeType, fileName)}`);
+    const objectPath = `${whatsappMediaStoragePrefix}/order-files/${safeClientId}/${safeOrderId}/${safeFolder}/${Date.now()}_${safeName}`;
+    const file = firebaseBucket.file(objectPath);
+    await file.save(buffer, {
+        resumable: false,
+        metadata: {
+            contentType: mimeType || 'application/octet-stream',
+            cacheControl: 'private, max-age=31536000'
+        }
+    });
+    const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: '2035-01-01'
+    });
+    return signedUrl;
+}
+
+async function uploadOrderFileBufferToStorage(args) {
+    if (isCloudinaryConfigured()) {
+        return await uploadOrderFileBufferToCloudinary(args);
+    }
+    return await uploadOrderFileBufferToFirebaseStorage(args);
+}
+
 async function fetchWhatsappMediaBuffer(mediaId) {
     ensureWhatsappConfig();
     const metaResponse = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
@@ -2753,11 +2813,41 @@ app.post('/api/whatsapp/initiate-preview', (req, res) => {
     });
 });
 
+app.post('/api/order-files/upload', async (req, res) => {
+    const orderId = String(req.body?.orderId || '').trim();
+    const clientId = String(req.body?.clientId || '').trim();
+    const folderName = String(req.body?.folderName || '').trim() || 'files';
+    const fileName = String(req.body?.fileName || '').trim() || 'file';
+    const dataUrl = String(req.body?.dataUrl || '').trim();
+
+    if (!orderId || !clientId || !dataUrl) {
+        return res.status(400).json({ ok: false, error: 'orderId, clientId, and dataUrl are required' });
+    }
+
+    try {
+        const { mimeType, buffer } = parseDataUrl(dataUrl);
+        const url = await uploadOrderFileBufferToStorage({
+            orderId,
+            clientId,
+            folderName,
+            fileName,
+            mimeType,
+            buffer
+        });
+        return res.json({ ok: true, url, fileName, mimeType });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Order file upload failed' });
+    }
+});
+
 app.post('/api/whatsapp/expert-notify', async (req, res) => {
     const taskTitle = String(req.body?.taskTitle || '').trim() || 'Untitled Task';
     const serviceType = String(req.body?.serviceType || '').trim() || 'General';
     const expertDeadline = String(req.body?.expertDeadline || '').trim() || 'TBD';
     const expertPayout = String(req.body?.expertPayout || '').trim() || 'TBD';
+    const taskFileLinks = Array.isArray(req.body?.taskFileLinks)
+        ? req.body.taskFileLinks.map((value) => String(value || '').trim()).filter(Boolean).slice(0, 10)
+        : [];
     const experts = Array.isArray(req.body?.experts) ? req.body.experts : [];
 
     if (!experts.length) {
@@ -2834,6 +2924,19 @@ app.post('/api/whatsapp/expert-notify', async (req, res) => {
                             status: 'sent',
                             statusTimestamp: timestamp
                         }
+                    });
+                }
+
+                if (taskFileLinks.length) {
+                    const linksText = [
+                        `Task files for ${taskTitle}:`,
+                        ...taskFileLinks.map((link, index) => `${index + 1}. ${link}`)
+                    ].join('\n');
+                    await sendWhatsappTextMessage({
+                        waId,
+                        text: linksText,
+                        senderType: 'human',
+                        route: 'expert-notify-files'
                     });
                 }
 

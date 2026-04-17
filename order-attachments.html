@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Order Files</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f5efe6;
+            --panel: rgba(255,255,255,0.94);
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: rgba(148, 163, 184, 0.24);
+            --brand: #4f46e5;
+            --brand-soft: rgba(79, 70, 229, 0.08);
+            --success: #059669;
+        }
+        html[data-theme="dark"] {
+            color-scheme: dark;
+            --bg: #0f172a;
+            --panel: rgba(15, 23, 42, 0.9);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --border: rgba(148, 163, 184, 0.22);
+            --brand: #93c5fd;
+            --brand-soft: rgba(96, 165, 250, 0.12);
+            --success: #86efac;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Segoe UI, Arial, sans-serif;
+            background: linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 86%, #ffffff));
+            color: var(--text);
+        }
+        .wrap {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        }
+        .hero {
+            padding: 24px;
+            margin-bottom: 18px;
+        }
+        .hero-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+        }
+        .hero h1, .hero p { margin: 0; }
+        .meta {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 280px minmax(0, 1fr) 320px;
+            gap: 18px;
+        }
+        .sidebar, .content, .uploader {
+            padding: 20px;
+        }
+        .folder-card {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 14px 16px;
+            background: rgba(255,255,255,0.78);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        html[data-theme="dark"] .folder-card {
+            background: rgba(15, 23, 42, 0.62);
+        }
+        .folder-card.is-active {
+            border-color: rgba(79, 70, 229, 0.4);
+            background: var(--brand-soft);
+        }
+        .breadcrumbs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .breadcrumbs button {
+            border: 0;
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            cursor: pointer;
+        }
+        .file-list {
+            border-top: 1px solid var(--border);
+            padding-top: 14px;
+        }
+        .file-item {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 14px 16px;
+            background: rgba(255,255,255,0.82);
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        html[data-theme="dark"] .file-item {
+            background: rgba(15, 23, 42, 0.62);
+        }
+        .file-item small {
+            display: block;
+            color: var(--muted);
+            margin-top: 6px;
+            word-break: break-word;
+        }
+        .dropzone {
+            border: 1.5px dashed var(--border);
+            border-radius: 20px;
+            min-height: 230px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            padding: 22px;
+            background: rgba(255,255,255,0.68);
+            cursor: pointer;
+        }
+        html[data-theme="dark"] .dropzone {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        .dropzone.is-dragover {
+            border-color: rgba(79, 70, 229, 0.5);
+            background: var(--brand-soft);
+        }
+        .dropzone h3, .dropzone p { margin: 0; }
+        .dropzone p { margin-top: 6px; color: var(--muted); }
+        .top-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .btn {
+            border: 0;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn-primary { background: var(--brand); color: #fff; }
+        .btn-soft { background: var(--brand-soft); color: var(--brand); }
+        .empty {
+            border: 1px dashed var(--border);
+            border-radius: 16px;
+            padding: 18px;
+            text-align: center;
+            color: var(--muted);
+        }
+        .status {
+            margin-top: 10px;
+            color: var(--success);
+            font-size: 13px;
+            font-weight: 700;
+        }
+        a { color: var(--brand); }
+        @media (max-width: 980px) {
+            .layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="panel hero">
+            <div class="hero-top">
+                <div>
+                    <h1>Order Files</h1>
+                    <p id="pageMeta" class="meta">Loading order details...</p>
+                    <p id="saveStatus" class="status"></p>
+                </div>
+                <div class="top-actions">
+                    <button class="btn btn-soft" type="button" id="newFolderBtn">New Folder</button>
+                    <button class="btn btn-soft" type="button" onclick="window.close()">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="layout">
+            <div class="panel sidebar">
+                <div id="folderTree"></div>
+            </div>
+            <div class="panel content">
+                <div id="breadcrumbs" class="breadcrumbs"></div>
+                <div id="fileList" class="file-list"></div>
+            </div>
+            <div class="panel uploader">
+                <label id="dropzone" class="dropzone" for="fileInput">
+                    <div>
+                        <h3>Drag & drop files here</h3>
+                        <p>or click to select a file</p>
+                        <p id="uploadHint" class="meta" style="margin-top:10px;">Choose a folder first.</p>
+                    </div>
+                </label>
+                <input id="fileInput" type="file" class="hidden" style="display:none;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
+        const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
+        const orderId = new URLSearchParams(window.location.search).get('orderId') || '';
+        const clientId = new URLSearchParams(window.location.search).get('clientId') || '';
+        const activePath = [];
+        const fileInput = document.getElementById('fileInput');
+        const dropzone = document.getElementById('dropzone');
+
+        function applyTheme() {
+            const theme = localStorage.getItem(APP_THEME_STORAGE_KEY) || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function parseJsonArray(raw) {
+            try {
+                const parsed = JSON.parse(String(raw || '[]'));
+                return Array.isArray(parsed) ? parsed : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function getContainer() {
+            const html = localStorage.getItem(ORDER_LIST_STORAGE_KEY) || '';
+            const container = document.createElement('div');
+            container.innerHTML = html;
+            return container;
+        }
+
+        function findCard(container) {
+            return Array.from(container.querySelectorAll('.order-card')).find((card) => {
+                const currentOrderId = String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+                return currentOrderId === orderId;
+            }) || null;
+        }
+
+        function getBackendBase() {
+            const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin) {
+                return 'http://localhost:3001';
+            }
+            return 'https://unisolvex-crm-backend-ra02.onrender.com';
+        }
+
+        function saveContainer(container, message) {
+            localStorage.setItem(ORDER_LIST_STORAGE_KEY, container.innerHTML);
+            document.getElementById('saveStatus').textContent = message || 'Saved successfully.';
+        }
+
+        function getCurrentPathKey() {
+            return activePath.join('/');
+        }
+
+        function getPathLabel(pathKey) {
+            if (!pathKey) return 'Root';
+            return pathKey
+                .split('/')
+                .filter(Boolean)
+                .map((part) => part === 'expert' ? 'Expert' : part === 'user' ? 'User' : part === 'task' ? 'Task' : part)
+                .join(' / ');
+        }
+
+        function getCustomFolders(card) {
+            return parseJsonArray(card?.dataset?.customOrderFolders || '[]')
+                .map((row) => ({
+                    name: String(row?.name || '').trim(),
+                    parentPath: String(row?.parentPath || '').trim(),
+                    path: String(row?.path || '').trim()
+                }))
+                .filter((row) => row.name && row.path);
+        }
+
+        function setCustomFolders(card, rows) {
+            if (!card) return;
+            card.dataset.customOrderFolders = JSON.stringify(Array.isArray(rows) ? rows : []);
+        }
+
+        function getCustomFiles(card) {
+            return parseJsonArray(card?.dataset?.customOrderFiles || '[]')
+                .map((row) => ({
+                    path: String(row?.path || '').trim(),
+                    name: String(row?.name || '').trim(),
+                    url: String(row?.url || '').trim(),
+                    addedAt: String(row?.addedAt || '').trim()
+                }))
+                .filter((row) => row.path && row.name && row.url);
+        }
+
+        function setCustomFiles(card, rows) {
+            if (!card) return;
+            card.dataset.customOrderFiles = JSON.stringify(Array.isArray(rows) ? rows : []);
+        }
+
+        function getChildFolders(card, pathKey) {
+            const customFolders = getCustomFolders(card).filter((row) => row.parentPath === pathKey);
+            const fixedFolders = [];
+            if (!pathKey) {
+                fixedFolders.push({ name: 'Expert', path: 'expert', fixed: true });
+                fixedFolders.push({ name: 'User', path: 'user', fixed: true });
+            }
+            if (pathKey === 'expert') {
+                fixedFolders.push({ name: 'Task', path: 'expert/task', fixed: true });
+            }
+            return [
+                ...fixedFolders,
+                ...customFolders.map((row) => ({ name: row.name, path: row.path, fixed: false }))
+            ];
+        }
+
+        function getFilesForPath(card, pathKey) {
+            if (!card) return [];
+            if (pathKey === 'expert/task') {
+                return parseJsonArray(card.dataset.questionAttachments || '[]');
+            }
+            if (pathKey === 'user') {
+                return parseJsonArray(card.dataset.solutionAttachments || '[]');
+            }
+            return getCustomFiles(card).filter((row) => row.path === pathKey);
+        }
+
+        function isUploadAllowed(pathKey) {
+            return Boolean(pathKey) && pathKey !== 'expert';
+        }
+
+        function setActivePath(nextPath) {
+            activePath.length = 0;
+            activePath.push(...nextPath);
+            render();
+        }
+
+        function buildBreadcrumbs() {
+            const rows = ['Root', ...activePath.map((part) => getPathLabel(part).split(' / ').pop() || part)];
+            const container = document.getElementById('breadcrumbs');
+            container.innerHTML = rows.map((part, index) => {
+                return `
+                    <button type="button" data-breadcrumb-index="${index}">${escapeHtml(part)}</button>
+                    ${index < rows.length - 1 ? '<span>/</span>' : ''}
+                `;
+            }).join('');
+            Array.from(container.querySelectorAll('[data-breadcrumb-index]')).forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const index = Number(btn.dataset.breadcrumbIndex);
+                    if (!Number.isFinite(index)) return;
+                    setActivePath(activePath.slice(0, Math.max(0, index - 1)));
+                });
+            });
+        }
+
+        function renderFolderTree() {
+            const container = getContainer();
+            const card = findCard(container);
+            const tree = document.getElementById('folderTree');
+            const topLevel = card ? getChildFolders(card, '') : [];
+            tree.innerHTML = topLevel.map((folder) => {
+                const rootSegment = String(folder.path || '').split('/')[0] || '';
+                const isActive = activePath[0] === rootSegment;
+                return `
+                    <div class="folder-card ${isActive ? 'is-active' : ''}" data-folder-root="${escapeHtml(folder.path)}">
+                        <strong>${escapeHtml(folder.name)}</strong>
+                        <span>&rsaquo;</span>
+                    </div>
+                `;
+            }).join('');
+            Array.from(tree.querySelectorAll('[data-folder-root]')).forEach((node) => {
+                node.addEventListener('click', () => {
+                    const key = String(node.dataset.folderRoot || '').trim();
+                    setActivePath(key ? key.split('/').filter(Boolean) : []);
+                });
+            });
+        }
+
+        function renderFileList() {
+            const container = getContainer();
+            const card = findCard(container);
+            const target = document.getElementById('fileList');
+            const pathKey = getCurrentPathKey();
+            if (!card) {
+                target.innerHTML = '<div class="empty">Order not found.</div>';
+                return;
+            }
+            if (!activePath.length) {
+                target.innerHTML = '<div class="empty">Choose or create a folder from the left side.</div>';
+                return;
+            }
+
+            const childFolders = getChildFolders(card, pathKey);
+            const items = getFilesForPath(card, pathKey);
+            const folderHtml = childFolders.map((folder) => `
+                <div class="folder-card" data-folder-path="${escapeHtml(folder.path)}">
+                    <strong>${escapeHtml(folder.name)}</strong>
+                    <span>&rsaquo;</span>
+                </div>
+            `).join('');
+            const fileHtml = items.map((item, index) => `
+                <div class="file-item">
+                    <div>
+                        <strong>${escapeHtml(item.name || 'Untitled')}</strong>
+                        <small><a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url || 'Open file')}</a></small>
+                    </div>
+                    <button class="btn btn-soft" type="button" onclick="removeItem(${index})">Remove</button>
+                </div>
+            `).join('');
+
+            target.innerHTML = folderHtml + fileHtml || '<div class="empty">No files or folders here yet.</div>';
+            Array.from(target.querySelectorAll('[data-folder-path]')).forEach((nodeEl) => {
+                nodeEl.addEventListener('click', () => {
+                    const path = String(nodeEl.dataset.folderPath || '').trim();
+                    setActivePath(path ? path.split('/').filter(Boolean) : []);
+                });
+            });
+            if (!childFolders.length && !items.length) {
+                target.innerHTML = '<div class="empty">No files or folders here yet.</div>';
+            }
+        }
+
+        function refreshMeta() {
+            const container = getContainer();
+            const card = findCard(container);
+            const meta = document.getElementById('pageMeta');
+            if (!card) {
+                meta.textContent = 'Order not found.';
+                return;
+            }
+            const title = card.querySelector('.order-title')?.textContent?.trim() || 'Order';
+            meta.textContent = `${title} | Order #${orderId} | Client ${clientId || card.dataset.clientId || '-'}`;
+        }
+
+        function updateUploadHint() {
+            const hint = document.getElementById('uploadHint');
+            const pathKey = getCurrentPathKey();
+            hint.textContent = isUploadAllowed(pathKey)
+                ? `Upload files into ${getPathLabel(pathKey)}.`
+                : 'Open or create a file folder first.';
+        }
+
+        async function fileToDataUrl(file) {
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function uploadFiles(files) {
+            const pathKey = getCurrentPathKey();
+            if (!isUploadAllowed(pathKey)) {
+                alert('Open a file folder first.');
+                return;
+            }
+            const selectedFiles = Array.from(files || []);
+            if (!selectedFiles.length) return;
+
+            const container = getContainer();
+            const card = findCard(container);
+            if (!card) return;
+            const rows = getFilesForPath(card, pathKey);
+            document.getElementById('saveStatus').textContent = 'Uploading...';
+
+            for (const file of selectedFiles) {
+                const dataUrl = await fileToDataUrl(file);
+                const response = await fetch(getBackendBase() + '/api/order-files/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        orderId,
+                        clientId: clientId || card.dataset.clientId || '',
+                        folderName: pathKey.replace(/\//g, '-'),
+                        fileName: file.name,
+                        dataUrl
+                    })
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || !payload?.ok || !payload?.url) {
+                    throw new Error(payload?.error || 'File upload failed');
+                }
+                rows.unshift({
+                    name: payload.fileName || file.name,
+                    url: payload.url,
+                    addedAt: new Date().toISOString()
+                });
+            }
+
+            if (pathKey === 'expert/task') {
+                card.dataset.questionAttachments = JSON.stringify(rows);
+            } else if (pathKey === 'user') {
+                card.dataset.solutionAttachments = JSON.stringify(rows);
+            } else {
+                const remaining = getCustomFiles(card).filter((row) => row.path !== pathKey);
+                setCustomFiles(card, [...rows.map((row) => ({ ...row, path: pathKey })), ...remaining]);
+            }
+            saveContainer(container, 'Files uploaded successfully.');
+            renderFileList();
+        }
+
+        function removeItem(index) {
+            const pathKey = getCurrentPathKey();
+            if (!isUploadAllowed(pathKey)) return;
+            const container = getContainer();
+            const card = findCard(container);
+            if (!card) return;
+            const rows = getFilesForPath(card, pathKey).filter((_, itemIndex) => itemIndex !== index);
+            if (pathKey === 'expert/task') {
+                card.dataset.questionAttachments = JSON.stringify(rows);
+            } else if (pathKey === 'user') {
+                card.dataset.solutionAttachments = JSON.stringify(rows);
+            } else {
+                const remaining = getCustomFiles(card).filter((row) => row.path !== pathKey);
+                setCustomFiles(card, [...rows.map((row) => ({ ...row, path: pathKey })), ...remaining]);
+            }
+            saveContainer(container, 'File removed successfully.');
+            renderFileList();
+        }
+
+        function createNewFolder() {
+            const container = getContainer();
+            const card = findCard(container);
+            if (!card) return;
+            const currentPath = getCurrentPathKey();
+            const name = String(window.prompt('Folder name:', '') || '').trim();
+            if (!name) return;
+            if (/[\\/]/.test(name)) {
+                alert('Folder name cannot contain / or \\');
+                return;
+            }
+            const nextPath = currentPath ? `${currentPath}/${name}` : name;
+            const existing = getChildFolders(card, currentPath)
+                .some((folder) => String(folder.name || '').toLowerCase() === name.toLowerCase());
+            if (existing) {
+                alert('A folder with this name already exists here.');
+                return;
+            }
+            const rows = getCustomFolders(card);
+            rows.push({
+                name,
+                parentPath: currentPath,
+                path: nextPath
+            });
+            setCustomFolders(card, rows);
+            saveContainer(container, 'Folder created successfully.');
+            setActivePath(nextPath.split('/').filter(Boolean));
+        }
+
+        function render() {
+            applyTheme();
+            refreshMeta();
+            buildBreadcrumbs();
+            renderFolderTree();
+            renderFileList();
+            updateUploadHint();
+        }
+
+        document.getElementById('newFolderBtn').addEventListener('click', createNewFolder);
+
+        fileInput.addEventListener('change', async function() {
+            try {
+                await uploadFiles(this.files || []);
+            } catch (error) {
+                alert(error?.message || 'Upload failed');
+            } finally {
+                this.value = '';
+            }
+        });
+
+        ;['dragenter', 'dragover'].forEach((eventName) => {
+            dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropzone.classList.add('is-dragover');
+            });
+        });
+        ;['dragleave', 'drop'].forEach((eventName) => {
+            dropzone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropzone.classList.remove('is-dragover');
+            });
+        });
+        dropzone.addEventListener('drop', async (event) => {
+            try {
+                await uploadFiles(event.dataTransfer?.files || []);
+            } catch (error) {
+                alert(error?.message || 'Upload failed');
+            }
+        });
+
+        window.removeItem = removeItem;
+        render();
+    </script>
+</body>
+</html>

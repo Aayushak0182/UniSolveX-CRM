@@ -386,7 +386,7 @@ html[data-theme="dark"] .brand-wordmark-accent {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
-  background-size: cover, contain;
+  background-size: cover, cover;
   background-repeat: no-repeat;
   background-position: center center;
 }
@@ -404,7 +404,7 @@ html[data-theme="dark"] .chat-wallpaper.is-empty-chat {
   background-image:
     linear-gradient(var(--chat-empty-overlay-top), var(--chat-empty-overlay-bottom)),
     url("./chat%20screen.png");
-  background-size: cover, contain;
+  background-size: cover, cover;
   background-repeat: no-repeat;
   background-position: center center;
 }
@@ -1798,6 +1798,139 @@ html[data-theme="dark"] .chat-empty-state {
   flex-shrink: 0;
 }
 
+.transaction-record-card {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.7rem 0.85rem;
+}
+
+.transaction-record-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem 0.85rem;
+}
+
+.transaction-record-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.08em;
+}
+
+.transaction-record-value {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  word-break: break-word;
+}
+
+.transaction-record-empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  color: #64748b;
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.manage-experts-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  padding-bottom: 0.65rem;
+}
+
+.manage-experts-tab {
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 0.55rem 0.3rem;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.manage-experts-tab.is-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.manage-experts-empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.95rem;
+}
+
+.manage-expert-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.95rem;
+}
+
+.manage-expert-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.85rem;
+}
+
+.manage-expert-card-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.08em;
+}
+
+.manage-expert-card-value {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.manage-expert-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+.manage-expert-action-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.manage-expert-action-btn.is-primary {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.manage-expert-action-btn.is-success {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.manage-expert-action-btn.is-muted {
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
 .task-meta-item-time {
   font-size: 10px;
   color: #94a3b8;
@@ -2406,6 +2539,116 @@ html[data-theme="dark"] .order-details-summary-label {
 
 html[data-theme="dark"] .order-details-summary-value {
   color: #e2e8f0;
+}
+
+html[data-theme="dark"] .transaction-record-card,
+html[data-theme="dark"] .manage-expert-card {
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(100, 116, 139, 0.32);
+}
+
+html[data-theme="dark"] .transaction-record-label,
+html[data-theme="dark"] .manage-expert-card-label,
+html[data-theme="dark"] .manage-experts-empty {
+  color: #94a3b8;
+}
+
+html[data-theme="dark"] .transaction-record-value,
+html[data-theme="dark"] .manage-expert-card-value,
+html[data-theme="dark"] .manage-experts-tab {
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .manage-experts-tab.is-active {
+  color: #93c5fd;
+  border-bottom-color: #60a5fa;
+}
+
+html[data-theme="dark"] .manage-expert-action-btn.is-muted {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] #orderDetailsDialog,
+html[data-theme="dark"] #transactionRecordsModal > div,
+html[data-theme="dark"] #addTransactionRecordModal > div,
+html[data-theme="dark"] #manageExpertsModal > div,
+html[data-theme="dark"] #assignAgentModal > div,
+html[data-theme="dark"] #clientDetailsModal > div,
+html[data-theme="dark"] #exportClientsModal > div,
+html[data-theme="dark"] #expertNotifyModal > div,
+html[data-theme="dark"] #monthlyDataModal > div,
+html[data-theme="dark"] #taskModal > div {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.96)) !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+}
+
+html[data-theme="dark"] #orderDetailsDialog h3,
+html[data-theme="dark"] #transactionRecordsModal h3,
+html[data-theme="dark"] #addTransactionRecordModal h3,
+html[data-theme="dark"] #manageExpertsModal h3,
+html[data-theme="dark"] #taskModal h3,
+html[data-theme="dark"] #assignAgentModal h3,
+html[data-theme="dark"] #clientDetailsModal h3,
+html[data-theme="dark"] #exportClientsModal h3,
+html[data-theme="dark"] #expertNotifyModal h3,
+html[data-theme="dark"] #monthlyDataModal h3 {
+  color: #f8fafc !important;
+}
+
+html[data-theme="dark"] #orderDetailsDialog p,
+html[data-theme="dark"] #transactionRecordsModal p,
+html[data-theme="dark"] #addTransactionRecordModal p,
+html[data-theme="dark"] #manageExpertsModal p,
+html[data-theme="dark"] #taskModal p,
+html[data-theme="dark"] #assignAgentModal p,
+html[data-theme="dark"] #clientDetailsModal p,
+html[data-theme="dark"] #exportClientsModal p,
+html[data-theme="dark"] #expertNotifyModal p,
+html[data-theme="dark"] #monthlyDataModal p,
+html[data-theme="dark"] #orderDetailsDialog label,
+html[data-theme="dark"] #transactionRecordsModal label,
+html[data-theme="dark"] #addTransactionRecordModal label,
+html[data-theme="dark"] #manageExpertsModal label,
+html[data-theme="dark"] #taskModal label,
+html[data-theme="dark"] #assignAgentModal label,
+html[data-theme="dark"] #clientDetailsModal label,
+html[data-theme="dark"] #exportClientsModal label,
+html[data-theme="dark"] #expertNotifyModal label,
+html[data-theme="dark"] #monthlyDataModal label,
+html[data-theme="dark"] #orderDetailsDialog li,
+html[data-theme="dark"] #transactionRecordsModal li,
+html[data-theme="dark"] #addTransactionRecordModal li,
+html[data-theme="dark"] #manageExpertsModal li {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="dark"] #orderDetailsDialog input,
+html[data-theme="dark"] #orderDetailsDialog textarea,
+html[data-theme="dark"] #orderDetailsDialog select,
+html[data-theme="dark"] #taskModal input,
+html[data-theme="dark"] #taskModal textarea,
+html[data-theme="dark"] #taskModal select,
+html[data-theme="dark"] #addTransactionRecordModal input,
+html[data-theme="dark"] #addTransactionRecordModal textarea,
+html[data-theme="dark"] #addTransactionRecordModal select,
+html[data-theme="dark"] #clientDetailsModal input,
+html[data-theme="dark"] #clientDetailsModal textarea,
+html[data-theme="dark"] #clientDetailsModal select,
+html[data-theme="dark"] #exportClientsModal input,
+html[data-theme="dark"] #assignAgentModal input,
+html[data-theme="dark"] #expertNotifyModal input {
+  background: rgba(15, 23, 42, 0.82) !important;
+  border-color: rgba(100, 116, 139, 0.36) !important;
+  color: #e2e8f0 !important;
+}
+
+html[data-theme="dark"] #manageExpertsMeta,
+html[data-theme="dark"] #transactionRecordsMeta,
+html[data-theme="dark"] #expertNotifyTaskMeta,
+html[data-theme="dark"] #assignAgentModalSubtitle {
+  color: #94a3b8 !important;
 }
 
 @media (max-width: 900px) {
