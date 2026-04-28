@@ -1896,17 +1896,22 @@ function renderInitiationTemplatePreview(contactName, agentName) {
         .trim();
 }
 
-function buildExpertNotifyText({ expertName, taskTitle, serviceType, expertDeadline, expertPayout }) {
+function buildExpertNotifyText({ expertName, orderId, taskTitle, serviceType, expertDeadline, expertPayout, sessionStart, sessionDuration, taskFileCount }) {
     const lines = [
         `Hello ${expertName || 'there'},`,
         '',
-        'A new task is available from UniSolvex.',
-        `Task: ${taskTitle || 'Untitled Task'}`,
+        /session|class/i.test(String(serviceType || taskTitle || ''))
+            ? 'We have a session opportunity for you from UniSolvex.'
+            : 'A new task is available from UniSolvex.',
+        `Order ID: ${orderId || 'TBD'}`,
+        `Subject/Topic: ${taskTitle || 'Untitled Task'}`,
         `Service: ${serviceType || 'General'}`,
-        `Expert deadline: ${expertDeadline || 'TBD'}`,
-        `Expert payout: ${expertPayout || 'TBD'}`,
+        `Date/Time: ${sessionStart || expertDeadline || 'TBD'}`,
+        sessionDuration ? `Duration: ${sessionDuration}` : `Expert deadline: ${expertDeadline || 'TBD'}`,
+        `Payout: ${expertPayout || 'TBD'}`,
+        taskFileCount ? `Study materials/files: ${taskFileCount} attached` : 'Study materials/files: will be shared separately if available',
         '',
-        'Please reply if you are available.'
+        'Please check the task details carefully and reply if you are interested and confident in this subject.'
     ];
     return lines.join('\n').trim();
 }
@@ -1914,15 +1919,20 @@ function buildExpertNotifyText({ expertName, taskTitle, serviceType, expertDeadl
 function renderExpertNotifyTemplatePreview(valuesByKey) {
     return String(expertNotifyTemplatePreviewText || '')
         .replace(/\{\{\s*expertName\s*\}\}/gi, String(valuesByKey.expertName || '').trim() || 'there')
+        .replace(/\{\{\s*orderId\s*\}\}/gi, String(valuesByKey.orderId || '').trim() || 'TBD')
         .replace(/\{\{\s*taskTitle\s*\}\}/gi, String(valuesByKey.taskTitle || '').trim() || 'Untitled Task')
         .replace(/\{\{\s*serviceType\s*\}\}/gi, String(valuesByKey.serviceType || '').trim() || 'General')
         .replace(/\{\{\s*expertDeadline\s*\}\}/gi, String(valuesByKey.expertDeadline || '').trim() || 'TBD')
         .replace(/\{\{\s*expertPayout\s*\}\}/gi, String(valuesByKey.expertPayout || '').trim() || 'TBD')
+        .replace(/\{\{\s*sessionStart\s*\}\}/gi, String(valuesByKey.sessionStart || '').trim() || String(valuesByKey.expertDeadline || '').trim() || 'TBD')
+        .replace(/\{\{\s*sessionDuration\s*\}\}/gi, String(valuesByKey.sessionDuration || '').trim() || 'TBD')
+        .replace(/\{\{\s*taskFileCount\s*\}\}/gi, String(valuesByKey.taskFileCount || '').trim() || '0')
         .replace(/\{\{\s*1\s*\}\}/g, String(valuesByKey.expertName || '').trim() || 'there')
-        .replace(/\{\{\s*2\s*\}\}/g, String(valuesByKey.taskTitle || '').trim() || 'Untitled Task')
-        .replace(/\{\{\s*3\s*\}\}/g, String(valuesByKey.serviceType || '').trim() || 'General')
-        .replace(/\{\{\s*4\s*\}\}/g, String(valuesByKey.expertDeadline || '').trim() || 'TBD')
-        .replace(/\{\{\s*5\s*\}\}/g, String(valuesByKey.expertPayout || '').trim() || 'TBD')
+        .replace(/\{\{\s*2\s*\}\}/g, String(valuesByKey.orderId || '').trim() || 'TBD')
+        .replace(/\{\{\s*3\s*\}\}/g, String(valuesByKey.taskTitle || '').trim() || 'Untitled Task')
+        .replace(/\{\{\s*4\s*\}\}/g, String(valuesByKey.sessionStart || '').trim() || String(valuesByKey.expertDeadline || '').trim() || 'TBD')
+        .replace(/\{\{\s*5\s*\}\}/g, String(valuesByKey.sessionDuration || '').trim() || String(valuesByKey.expertPayout || '').trim() || 'TBD')
+        .replace(/\{\{\s*6\s*\}\}/g, String(valuesByKey.expertPayout || '').trim() || 'TBD')
         .trim();
 }
 
@@ -1961,14 +1971,18 @@ function buildExpertNotifyTemplateAttempts(valuesByKey) {
         });
 }
 
-async function sendExpertNotifyMessage({ waId, expertName, taskTitle, serviceType, expertDeadline, expertPayout }) {
+async function sendExpertNotifyMessage({ waId, expertName, orderId, taskTitle, serviceType, expertDeadline, expertPayout, sessionStart, sessionDuration, taskFileCount }) {
     const normalizedWaId = normalizeWaId(waId);
     const valuesByKey = {
         expertName: String(expertName || '').trim() || 'there',
+        orderId: String(orderId || '').trim() || 'TBD',
         taskTitle: String(taskTitle || '').trim() || 'Untitled Task',
         serviceType: String(serviceType || '').trim() || 'General',
         expertDeadline: String(expertDeadline || '').trim() || 'TBD',
-        expertPayout: String(expertPayout || '').trim() || 'TBD'
+        expertPayout: String(expertPayout || '').trim() || 'TBD',
+        sessionStart: String(sessionStart || '').trim(),
+        sessionDuration: String(sessionDuration || '').trim(),
+        taskFileCount: String(taskFileCount || 0).trim()
     };
     const previewText = renderExpertNotifyTemplatePreview(valuesByKey) || buildExpertNotifyText(valuesByKey);
 
@@ -2888,11 +2902,53 @@ app.post('/api/order-files/upload', async (req, res) => {
     }
 });
 
-app.post('/api/whatsapp/expert-notify', async (req, res) => {
+app.post('/api/whatsapp/expert-notify-preview', (req, res) => {
+    const orderId = String(req.body?.orderId || '').trim() || 'TBD';
     const taskTitle = String(req.body?.taskTitle || '').trim() || 'Untitled Task';
     const serviceType = String(req.body?.serviceType || '').trim() || 'General';
     const expertDeadline = String(req.body?.expertDeadline || '').trim() || 'TBD';
     const expertPayout = String(req.body?.expertPayout || '').trim() || 'TBD';
+    const sessionStart = String(req.body?.sessionStart || '').trim();
+    const sessionDuration = String(req.body?.sessionDuration || '').trim();
+    const taskFileCount = Math.max(0, Number(req.body?.taskFileCount || 0) || 0);
+    const expertName = String(req.body?.expertName || 'Expert').trim() || 'Expert';
+    const previewText = renderExpertNotifyTemplatePreview({
+        expertName,
+        orderId,
+        taskTitle,
+        serviceType,
+        expertDeadline,
+        expertPayout,
+        sessionStart,
+        sessionDuration,
+        taskFileCount: String(taskFileCount)
+    }) || buildExpertNotifyText({
+        expertName,
+        orderId,
+        taskTitle,
+        serviceType,
+        expertDeadline,
+        expertPayout,
+        sessionStart,
+        sessionDuration,
+        taskFileCount
+    });
+    return res.json({
+        ok: true,
+        templateName: expertNotifyTemplateName,
+        templateLanguage: expertNotifyTemplateLanguage,
+        previewText
+    });
+});
+
+app.post('/api/whatsapp/expert-notify', async (req, res) => {
+    const orderId = String(req.body?.orderId || '').trim() || 'TBD';
+    const taskTitle = String(req.body?.taskTitle || '').trim() || 'Untitled Task';
+    const serviceType = String(req.body?.serviceType || '').trim() || 'General';
+    const expertDeadline = String(req.body?.expertDeadline || '').trim() || 'TBD';
+    const expertPayout = String(req.body?.expertPayout || '').trim() || 'TBD';
+    const sessionStart = String(req.body?.sessionStart || '').trim();
+    const sessionDuration = String(req.body?.sessionDuration || '').trim();
     const taskFileLinks = Array.isArray(req.body?.taskFileLinks)
         ? req.body.taskFileLinks.map((value) => String(value || '').trim()).filter(Boolean).slice(0, 10)
         : [];
@@ -2934,10 +2990,14 @@ app.post('/api/whatsapp/expert-notify', async (req, res) => {
                 const notifyResult = await sendExpertNotifyMessage({
                     waId,
                     expertName,
+                    orderId,
                     taskTitle,
                     serviceType,
                     expertDeadline,
-                    expertPayout
+                    expertPayout,
+                    sessionStart,
+                    sessionDuration,
+                    taskFileCount: taskFileLinks.length
                 });
 
                 if (notifyResult.messageType === 'template') {

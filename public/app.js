@@ -5808,9 +5808,12 @@ lucide.createIcons();
                 return;
             }
             const taskTitle = activeNotifyOrderCard.querySelector('.order-title')?.textContent?.trim() || 'Untitled Task';
+            const orderId = String(activeNotifyOrderCard.querySelector('.order-id')?.textContent || '').replace('#', '').trim() || 'TBD';
             const serviceType = String(activeNotifyOrderCard.dataset.serviceType || '').trim() || taskTitle;
             const expertDeadline = activeNotifyOrderCard.querySelector('.order-expert-deadline')?.dataset.baseValue || activeNotifyOrderCard.querySelector('.order-expert-deadline')?.textContent?.trim() || 'TBD';
             const expertPayout = String(activeNotifyOrderCard.dataset.expertPayout || activeNotifyOrderCard.querySelector('.order-expert-pay')?.textContent || 'TBD').trim() || 'TBD';
+            const sessionStart = String(activeNotifyOrderCard.dataset.sessionStart || '').trim();
+            const sessionDuration = String(activeNotifyOrderCard.dataset.sessionDuration || '').trim();
             const taskFileLinks = [
                 ...parseOrderAttachments(activeNotifyOrderCard.dataset.questionAttachments || '[]'),
                 ...parseOrderAttachments(activeNotifyOrderCard.dataset.customOrderFiles || '[]')
@@ -5821,27 +5824,60 @@ lucide.createIcons();
 
             const originalText = confirmExpertNotifyBtn.textContent;
             confirmExpertNotifyBtn.disabled = true;
-            confirmExpertNotifyBtn.textContent = 'Sending...';
+            confirmExpertNotifyBtn.textContent = 'Preparing...';
 
-            whatsappFetch('/api/whatsapp/expert-notify', {
+            whatsappFetch('/api/whatsapp/expert-notify-preview', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
+                    orderId,
                     taskTitle,
                     serviceType,
                     expertDeadline,
                     expertPayout,
-                    taskFileLinks,
-                    experts: expertsToNotify.map((expert) => ({
-                        expertId: expert.expertId,
-                        name: expert.name,
-                        waId: expert.waId
-                    }))
+                    sessionStart,
+                    sessionDuration,
+                    taskFileCount: taskFileLinks.length,
+                    expertName: expertsToNotify[0]?.name || 'Expert'
                 })
             })
                 .then(async (res) => {
+                    const previewData = await res.json();
+                    if (!res.ok || !previewData?.ok) {
+                        throw new Error(previewData?.error || 'Expert notify preview failed');
+                    }
+                    const previewText = String(previewData?.previewText || '').trim();
+                    const shouldSend = window.confirm('Ye expert task notify template send hoga:\n\n' + (previewText || '(preview unavailable)') + '\n\nAbhi bhejna hai?');
+                    if (!shouldSend) {
+                        return { cancelled: true };
+                    }
+                    confirmExpertNotifyBtn.textContent = 'Sending...';
+                    return whatsappFetch('/api/whatsapp/expert-notify', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            orderId,
+                            taskTitle,
+                            serviceType,
+                            expertDeadline,
+                            expertPayout,
+                            sessionStart,
+                            sessionDuration,
+                            taskFileLinks,
+                            experts: expertsToNotify.map((expert) => ({
+                                expertId: expert.expertId,
+                                name: expert.name,
+                                waId: expert.waId
+                            }))
+                        })
+                    });
+                })
+                .then(async (res) => {
+                    if (!res || res.cancelled) return null;
                     const data = await res.json();
                     if (!res.ok || !data?.ok) {
                         throw new Error(data?.error || 'Expert notification failed');
@@ -5857,6 +5893,7 @@ lucide.createIcons();
                     if (Array.isArray(data.failures) && data.failures.length) {
                         alert(`Notified ${successfulIds.length} expert(s). ${data.failures.length} failed.`);
                     }
+                    return data;
                 })
                 .catch((error) => {
                     alert('Expert notification failed: ' + (error?.message || 'Unknown error'));
