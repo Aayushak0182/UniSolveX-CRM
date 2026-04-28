@@ -2512,7 +2512,10 @@ app.delete('/api/whatsapp/contact/:waId', async (req, res) => {
 
 app.post('/api/crm/state', async (req, res) => {
     try {
-        await persistCrmState(req.body || {});
+        const persisted = await persistCrmState(req.body || {});
+        if (!persisted) {
+            return res.status(503).json({ ok: false, error: 'Persistent CRM storage is not available' });
+        }
         const statePayload = {
             orderListHtml: crmState.orderListHtml,
             orderAttachmentsById: crmState.orderAttachmentsById,

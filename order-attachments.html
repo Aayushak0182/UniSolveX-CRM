@@ -411,6 +411,18 @@
             return next;
         }
 
+        function notifyParentAttachmentUpdate(container) {
+            try {
+                if (!window.opener || window.opener.closed) return;
+                window.opener.postMessage({
+                    type: 'crm-order-attachments-updated',
+                    orderId,
+                    clientId,
+                    orderAttachmentsById: collectAttachmentStateFromContainer(container)
+                }, '*');
+            } catch {}
+        }
+
         async function fetchCrmState() {
             let response;
             try {
@@ -454,6 +466,7 @@
             if (!response.ok) {
                 throw new Error('Cloud save failed.');
             }
+            notifyParentAttachmentUpdate(container);
         }
 
         function getCurrentPathKey() {

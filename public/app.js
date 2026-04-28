@@ -562,7 +562,6 @@ lucide.createIcons();
 
         function persistOrderListToStorage(skipRemote) {
             cloudCrmState.orderListHtml = orderList.innerHTML;
-            cloudCrmState.orderAttachmentsById = collectOrderAttachmentStateFromDom();
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -587,9 +586,9 @@ lucide.createIcons();
                 && Array.from(orderList.querySelectorAll('.order-card')).some((card) => !card.classList.contains('expert-card'));
             return {
                 orderListHtml: canSnapshotVisibleOrderList ? (orderList.innerHTML || '') : (cloudCrmState.orderListHtml || ''),
-                orderAttachmentsById: canSnapshotVisibleOrderList
-                    ? collectOrderAttachmentStateFromDom()
-                    : (cloudCrmState.orderAttachmentsById && typeof cloudCrmState.orderAttachmentsById === 'object' ? cloudCrmState.orderAttachmentsById : {}),
+                orderAttachmentsById: cloudCrmState.orderAttachmentsById && typeof cloudCrmState.orderAttachmentsById === 'object'
+                    ? cloudCrmState.orderAttachmentsById
+                    : {},
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
                 agentRoster: readAgentRosterFromStorage(),
@@ -709,11 +708,48 @@ lucide.createIcons();
             if (typeof state.customOrderFiles === 'string') card.dataset.customOrderFiles = state.customOrderFiles;
         }
 
+        function syncOrderAttachmentStateForCard(card, skipRemote) {
+            if (!card) return;
+            const orderId = getOrderAttachmentStateKey(card);
+            if (!orderId) return;
+            if (!cloudCrmState.orderAttachmentsById || typeof cloudCrmState.orderAttachmentsById !== 'object') {
+                cloudCrmState.orderAttachmentsById = {};
+            }
+            cloudCrmState.orderAttachmentsById[orderId] = {
+                questionAttachments: String(card.dataset.questionAttachments || '[]'),
+                solutionAttachments: String(card.dataset.solutionAttachments || '[]'),
+                customOrderFolders: String(card.dataset.customOrderFolders || '[]'),
+                customOrderFiles: String(card.dataset.customOrderFiles || '[]')
+            };
+            if (!skipRemote) {
+                scheduleCrmStateSave();
+            }
+        }
+
         function applyOrderAttachmentStateToOrderList() {
             Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
                 if (card.classList.contains('expert-card')) return;
                 applyOrderAttachmentStateToCard(card);
             });
+        }
+
+        function mergeIncomingOrderAttachmentState(map) {
+            if (!map || typeof map !== 'object') return;
+            if (!cloudCrmState.orderAttachmentsById || typeof cloudCrmState.orderAttachmentsById !== 'object') {
+                cloudCrmState.orderAttachmentsById = {};
+            }
+            Object.entries(map).forEach(([orderId, state]) => {
+                const key = String(orderId || '').trim();
+                if (!key || !state || typeof state !== 'object') return;
+                cloudCrmState.orderAttachmentsById[key] = {
+                    questionAttachments: String(state.questionAttachments || '[]'),
+                    solutionAttachments: String(state.solutionAttachments || '[]'),
+                    customOrderFolders: String(state.customOrderFolders || '[]'),
+                    customOrderFiles: String(state.customOrderFiles || '[]')
+                };
+            });
+            applyOrderAttachmentStateToOrderList();
+            persistOrderListToStorage();
         }
 
         function applyCrmStateSnapshot(state, options = {}) {
@@ -3446,6 +3482,7 @@ lucide.createIcons();
                 addedAt: new Date().toISOString()
             });
             activeOrderCard.dataset[datasetKey] = JSON.stringify(rows);
+            syncOrderAttachmentStateForCard(activeOrderCard, true);
             renderOrderAttachmentList(target, rows, kind);
             syncOrderExpertSummary(activeOrderCard);
             if (nameInput) nameInput.value = '';
@@ -3461,6 +3498,7 @@ lucide.createIcons();
             const rows = parseOrderAttachments(activeOrderCard.dataset[datasetKey] || '[]')
                 .filter((_, rowIndex) => rowIndex !== index);
             activeOrderCard.dataset[datasetKey] = JSON.stringify(rows);
+            syncOrderAttachmentStateForCard(activeOrderCard, true);
             renderOrderAttachmentList(target, rows, kind);
             syncOrderExpertSummary(activeOrderCard);
             persistOrderListToStorage();
@@ -4145,6 +4183,7 @@ lucide.createIcons();
                 messageType: 'text',
                 status: 'sent',
                 statusTimestamp: message.statusTimestamp || new Date().toISOString(),
+                errorReason: String(message.errorReason || '').trim(),
                 ...message
             };
             const existingIndex = findWhatsappMessageIndex(normalizedWaId, normalizedMessage);
@@ -4180,7 +4219,10 @@ lucide.createIcons();
             if (index < 0) return false;
             rows[index] = {
                 ...rows[index],
-                ...updates
+                ...updates,
+                ...(Object.prototype.hasOwnProperty.call(updates || {}, 'errorReason')
+                    ? { errorReason: String(updates?.errorReason || '').trim() }
+                    : {})
             };
             whatsappMessagesByContact[normalizedWaId] = rows;
             const nextId = String(rows[index]?.id || '');
@@ -4217,13 +4259,15 @@ lucide.createIcons();
                     updateLocalWhatsappMessage(nextItem.waId, nextItem.tempId, {
                         id: data?.id || nextItem.tempId,
                         status: 'sent',
-                        statusTimestamp: new Date().toISOString()
+                        statusTimestamp: new Date().toISOString(),
+                        errorReason: ''
                     });
                 } catch (err) {
                     console.error('Failed to send queued WhatsApp message:', err);
                     updateLocalWhatsappMessage(nextItem.waId, nextItem.tempId, {
                         status: 'failed',
-                        statusTimestamp: new Date().toISOString()
+                        statusTimestamp: new Date().toISOString(),
+                        errorReason: err?.message || 'Send failed'
                     });
                 } finally {
                     whatsappTextSendQueue.shift();
@@ -4252,7 +4296,7 @@ lucide.createIcons();
             updateChatAssignmentState(activeWhatsappWaId);
         }
 
-        function getStatusTickHtml(rawStatus) {
+        function getStatusTickHtml(rawStatus, failedReason) {
             const status = normalizeMessageStatus(rawStatus);
             if (status === 'read') {
                 return '<span class="chat-status chat-status-read" title="Read"><svg viewBox="0 0 16 12" aria-hidden="true"><path d="M1.5 6.5 4.5 9.5 8.5 2.5"></path><path d="M7.5 6.5 10.5 9.5 14.5 2.5"></path></svg></span>';
@@ -4261,7 +4305,8 @@ lucide.createIcons();
                 return '<span class="chat-status chat-status-delivered" title="Delivered"><svg viewBox="0 0 16 12" aria-hidden="true"><path d="M1.5 6.5 4.5 9.5 8.5 2.5"></path><path d="M7.5 6.5 10.5 9.5 14.5 2.5"></path></svg></span>';
             }
             if (status === 'failed') {
-                return '<span class="chat-status chat-status-failed" title="Failed">!</span>';
+                const tooltip = escapeHtml(String(failedReason || '').trim() || 'Failed');
+                return `<span class="chat-status chat-status-failed" title="${tooltip}">!</span>`;
             }
             return '<span class="chat-status chat-status-sent" title="Sent"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.25 3.6 7.35 8.25 1.75"></path></svg></span>';
         }
@@ -4332,11 +4377,12 @@ lucide.createIcons();
                 const clientKey = ensureMessageClientKey(msg);
                 const wrap = document.createElement('div');
                 const incoming = msg.direction === 'incoming';
-                const statusTick = incoming ? '' : getStatusTickHtml(msg.status);
+                const statusTick = incoming ? '' : getStatusTickHtml(msg.status, msg.errorReason);
                 const messageType = msg.messageType || 'text';
                 const isTemplateMessage = String(messageType).toLowerCase() === 'template';
                 const attachmentName = escapeHtml(msg.attachmentName || '');
                 const attachmentUrl = String(msg.attachmentUrl || '').trim();
+                const errorReason = String(msg.errorReason || '').trim();
                 const isHandoffMessage = String(messageType).toLowerCase() === 'handoff';
                 const replyQuote = msg.replyTo?.id
                     ? `
@@ -4652,6 +4698,7 @@ lucide.createIcons();
                 mediaId: payload.mediaId || '',
                 mimeType: payload.mimeType || '',
                 replyTo: payload.replyTo || null,
+                errorReason: String(payload.errorReason || '').trim(),
                 status: normalizeMessageStatus(payload.status || whatsappMessageStatusById[payload.id || '']?.status),
                 statusTimestamp: payload.statusTimestamp || whatsappMessageStatusById[payload.id || '']?.statusTimestamp || payload.timestamp || new Date().toISOString()
             };
@@ -4913,6 +4960,11 @@ lucide.createIcons();
                 crmStatePendingSave = false;
                 scheduleCrmStateSave();
             }
+        });
+        window.addEventListener('message', (event) => {
+            const data = event?.data;
+            if (!data || data.type !== 'crm-order-attachments-updated') return;
+            mergeIncomingOrderAttachmentState(data.orderAttachmentsById);
         });
         if (chatHeaderAvatar) chatHeaderAvatar.textContent = '?';
         updateChatHeaderVisibility('');
@@ -6020,7 +6072,8 @@ lucide.createIcons();
                         attachmentUrl: '',
                         mimeType: file.type || 'application/octet-stream',
                         replyTo: activeReplyContext ? { ...activeReplyContext } : null,
-                        status: 'failed'
+                        status: 'failed',
+                        errorReason: error?.message || 'Attachment send failed'
                     });
                     throw error;
                 }
@@ -6081,6 +6134,14 @@ lucide.createIcons();
                 void loadWhatsappContacts();
             } catch (err) {
                 console.error('Failed to send chat initiation:', err);
+                appendLocalOutgoingMessage(activeWhatsappWaId, {
+                    id: makeTempMessageId('template_failed'),
+                    text: String(chatInput?.title || '').trim() || 'Chat initiation template failed',
+                    messageType: 'template',
+                    status: 'failed',
+                    errorReason: err?.message || 'Chat initiation failed'
+                });
+                renderWhatsappMessages(activeWhatsappWaId);
                 alert('Chat initiation failed: ' + (err?.message || 'Unknown error'));
             } finally {
                 setChatSendState(false);
@@ -6149,7 +6210,8 @@ lucide.createIcons();
                         text,
                         messageType: 'text',
                         replyTo: activeReplyContext ? { ...activeReplyContext } : null,
-                        status: 'failed'
+                        status: 'failed',
+                        errorReason: reason
                     });
                     renderWhatsappMessages(activeWhatsappWaId);
                 }
