@@ -87,6 +87,7 @@ const aiStateByWaId = new Map();
 const aiReplyQueueByWaId = new Map();
 const crmState = {
     orderListHtml: '',
+    orderAttachmentsById: {},
     manualContacts: [],
     experts: [],
     agentRoster: [],
@@ -587,6 +588,22 @@ async function persistMessageStatusSnapshot(waId, messageId, status, statusTimes
 }
 
 function normalizeCrmStatePayload(payload = {}) {
+    const nextOrderAttachments = payload.orderAttachmentsById && typeof payload.orderAttachmentsById === 'object'
+        ? Object.fromEntries(
+            Object.entries(payload.orderAttachmentsById)
+                .map(([key, value]) => {
+                    const orderId = String(key || '').trim();
+                    if (!orderId || !value || typeof value !== 'object') return null;
+                    return [orderId, {
+                        questionAttachments: String(value.questionAttachments || '[]'),
+                        solutionAttachments: String(value.solutionAttachments || '[]'),
+                        customOrderFolders: String(value.customOrderFolders || '[]'),
+                        customOrderFiles: String(value.customOrderFiles || '[]')
+                    }];
+                })
+                .filter(Boolean)
+        )
+        : crmState.orderAttachmentsById;
     const nextManualContacts = Array.isArray(payload.manualContacts)
         ? payload.manualContacts
             .filter((row) => row && typeof row === 'object')
@@ -647,6 +664,7 @@ function normalizeCrmStatePayload(payload = {}) {
         : crmState.experts;
     return {
         orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
+        orderAttachmentsById: nextOrderAttachments,
         manualContacts: nextManualContacts,
         experts: nextExperts,
         agentRoster: nextAgentRoster,
@@ -673,6 +691,7 @@ async function loadPersistedCrmState() {
     const data = snapshot.data() || {};
     const nextState = normalizeCrmStatePayload(data);
     crmState.orderListHtml = nextState.orderListHtml;
+    crmState.orderAttachmentsById = nextState.orderAttachmentsById;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
@@ -702,6 +721,7 @@ async function persistCrmState(partialPayload = {}) {
         ...partialPayload
     });
     crmState.orderListHtml = nextState.orderListHtml;
+    crmState.orderAttachmentsById = nextState.orderAttachmentsById;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
@@ -2310,6 +2330,7 @@ app.get('/api/whatsapp/debug', (_req, res) => {
         crmState: {
             loaded: crmStateLoaded,
             updatedAt: crmState.updatedAt,
+            orderAttachments: Object.keys(crmState.orderAttachmentsById || {}).length,
             manualContacts: crmState.manualContacts.length,
             experts: crmState.experts.length,
             hasOrderListHtml: Boolean(crmState.orderListHtml),
@@ -2385,6 +2406,7 @@ app.get('/api/crm/state', async (_req, res) => {
     }
     const statePayload = {
         orderListHtml: crmState.orderListHtml,
+        orderAttachmentsById: crmState.orderAttachmentsById,
         manualContacts: crmState.manualContacts,
         experts: crmState.experts,
         agentRoster: crmState.agentRoster,
@@ -2493,6 +2515,7 @@ app.post('/api/crm/state', async (req, res) => {
         await persistCrmState(req.body || {});
         const statePayload = {
             orderListHtml: crmState.orderListHtml,
+            orderAttachmentsById: crmState.orderAttachmentsById,
             manualContacts: crmState.manualContacts,
             experts: crmState.experts,
             agentRoster: crmState.agentRoster,
@@ -2683,17 +2706,32 @@ app.post('/api/whatsapp/initiate', async (req, res) => {
     const waId = normalizeWaId(req.body?.waId || '');
     const contactName = String(req.body?.contactName || '').trim() || 'there';
     const agentName = String(req.body?.agentName || '').trim() || 'our team';
+    const previewText = renderInitiationTemplatePreview(contactName, agentName);
 
     if (!waId) {
         return res.status(400).json({ ok: false, error: 'waId is required' });
     }
-    if (!whatsappInitiationTemplateName) {
-        return res.status(400).json({ ok: false, error: 'WHATSAPP_INIT_TEMPLATE_NAME is not configured on the backend' });
-    }
 
     try {
         ensureWhatsappConfig();
-        const previewText = renderInitiationTemplatePreview(contactName, agentName);
+        if (!whatsappInitiationTemplateName) {
+            const textResult = await sendWhatsappTextMessage({
+                waId,
+                text: previewText,
+                senderType: 'human',
+                route: 'initiate',
+                messageType: 'text'
+            });
+            return res.json({
+                ok: true,
+                id: textResult.id,
+                text: previewText,
+                previewText,
+                templateName: '',
+                templateLanguage: '',
+                messageType: 'text'
+            });
+        }
         pushApiEvent({
             at: new Date().toISOString(),
             route: 'initiate',
@@ -2834,7 +2872,14 @@ app.post('/api/order-files/upload', async (req, res) => {
             mimeType,
             buffer
         });
-        return res.json({ ok: true, url, fileName, mimeType });
+        return res.json({
+            ok: true,
+            url,
+            fileName,
+            mimeType,
+            sizeBytes: buffer.length,
+            uploadedAt: new Date().toISOString()
+        });
     } catch (error) {
         return res.status(500).json({ ok: false, error: error?.message || 'Order file upload failed' });
     }

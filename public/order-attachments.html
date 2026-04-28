@@ -328,6 +328,42 @@
             }
         }
 
+        function formatFileSize(bytes) {
+            const value = Number(bytes || 0);
+            if (!Number.isFinite(value) || value <= 0) return '';
+            if (value < 1024) return `${value} B`;
+            if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+            return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        function formatFileDate(value) {
+            const date = new Date(value || '');
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function normalizeAttachmentStateMap(raw) {
+            if (!raw || typeof raw !== 'object') return {};
+            const next = {};
+            Object.entries(raw).forEach(([key, value]) => {
+                const orderKey = String(key || '').trim();
+                if (!orderKey || !value || typeof value !== 'object') return;
+                next[orderKey] = {
+                    questionAttachments: String(value.questionAttachments || '[]'),
+                    solutionAttachments: String(value.solutionAttachments || '[]'),
+                    customOrderFolders: String(value.customOrderFolders || '[]'),
+                    customOrderFiles: String(value.customOrderFiles || '[]')
+                };
+            });
+            return next;
+        }
+
         function getContainerFromHtml(html) {
             const container = document.createElement('div');
             container.innerHTML = String(html || '');
@@ -349,7 +385,33 @@
             return 'https://unisolvex-crm-backend-ra02.onrender.com';
         }
 
-        async function fetchCrmStateHtml() {
+        function applyAttachmentStateToCard(card, attachmentMap) {
+            if (!card) return;
+            const currentOrderId = String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+            const state = currentOrderId ? attachmentMap[currentOrderId] : null;
+            if (!state) return;
+            card.dataset.questionAttachments = String(state.questionAttachments || '[]');
+            card.dataset.solutionAttachments = String(state.solutionAttachments || '[]');
+            card.dataset.customOrderFolders = String(state.customOrderFolders || '[]');
+            card.dataset.customOrderFiles = String(state.customOrderFiles || '[]');
+        }
+
+        function collectAttachmentStateFromContainer(container) {
+            const next = {};
+            Array.from(container.querySelectorAll('.order-card')).forEach((card) => {
+                const currentOrderId = String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+                if (!currentOrderId) return;
+                next[currentOrderId] = {
+                    questionAttachments: String(card.dataset.questionAttachments || '[]'),
+                    solutionAttachments: String(card.dataset.solutionAttachments || '[]'),
+                    customOrderFolders: String(card.dataset.customOrderFolders || '[]'),
+                    customOrderFiles: String(card.dataset.customOrderFiles || '[]')
+                };
+            });
+            return next;
+        }
+
+        async function fetchCrmState() {
             let response;
             try {
                 response = await fetch(getBackendBase() + '/api/crm/state');
@@ -361,11 +423,18 @@
             if (!response.ok || typeof state?.orderListHtml !== 'string') {
                 throw new Error('CRM state could not be loaded from cloud.');
             }
-            return state.orderListHtml;
+            return {
+                orderListHtml: state.orderListHtml,
+                orderAttachmentsById: normalizeAttachmentStateMap(state.orderAttachmentsById)
+            };
         }
 
         async function loadContainer() {
-            return getContainerFromHtml(await fetchCrmStateHtml());
+            const state = await fetchCrmState();
+            const container = getContainerFromHtml(state.orderListHtml);
+            const card = findCard(container);
+            applyAttachmentStateToCard(card, state.orderAttachmentsById);
+            return container;
         }
 
         async function saveContainer(container, message) {
@@ -375,7 +444,9 @@
                 response = await fetch(getBackendBase() + '/api/crm/state', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderListHtml: container.innerHTML })
+                    body: JSON.stringify({
+                        orderAttachmentsById: collectAttachmentStateFromContainer(container)
+                    })
                 });
             } catch (error) {
                 throw new Error('Backend unreachable. Changes were not saved to cloud.');
@@ -419,7 +490,8 @@
                     path: String(row?.path || '').trim(),
                     name: String(row?.name || '').trim(),
                     url: String(row?.url || '').trim(),
-                    addedAt: String(row?.addedAt || '').trim()
+                    addedAt: String(row?.addedAt || '').trim(),
+                    sizeBytes: Number(row?.sizeBytes || 0) || 0
                 }))
                 .filter((row) => row.path && row.name && row.url);
         }
@@ -531,7 +603,7 @@
                 <div class="file-item">
                     <div class="file-item-main">
                         <div class="file-item-title">${escapeHtml(item.name || 'Untitled')}</div>
-                        <a class="file-item-link" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(item.url || '')}">${escapeHtml(item.url || 'Open file')}</a>
+                        <small>${escapeHtml([formatFileDate(item.addedAt), formatFileSize(item.sizeBytes)].filter(Boolean).join(' | ') || 'Uploaded file')}</small>
                     </div>
                     <div class="file-item-actions">
                         <a class="btn btn-soft icon-btn" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" title="Download">
@@ -671,7 +743,8 @@
                 rows.unshift({
                     name: payload.fileName || file.name,
                     url: payload.url,
-                    addedAt: new Date().toISOString()
+                    addedAt: payload.uploadedAt || new Date().toISOString(),
+                    sizeBytes: Number(payload.sizeBytes || file.size || 0) || 0
                 });
             }
 

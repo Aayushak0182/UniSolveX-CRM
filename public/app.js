@@ -207,6 +207,8 @@ lucide.createIcons();
         let whatsappPollingTimer = null;
         let whatsappDebugTimer = null;
         let whatsappSocketConnected = false;
+        let whatsappSocket = null;
+        let whatsappSocketReconnectTimer = null;
         let activeWhatsappApiBase = '';
         let reachableWhatsappApiBases = [];
         let contactOrderCounter = contactItems.length;
@@ -257,6 +259,7 @@ lucide.createIcons();
         let lastCrmStateUpdatedAt = '';
         const cloudCrmState = {
             orderListHtml: '',
+            orderAttachmentsById: {},
             manualContacts: [],
             experts: [],
             agentRoster: [],
@@ -553,11 +556,13 @@ lucide.createIcons();
             const storedOrderListHtml = typeof cloudCrmState.orderListHtml === 'string' ? cloudCrmState.orderListHtml : '';
             if (!storedOrderListHtml) return;
             orderList.innerHTML = storedOrderListHtml;
+            Array.from(orderList.querySelectorAll('.expert-card')).forEach((card) => card.remove());
             lucide.createIcons();
         }
 
         function persistOrderListToStorage(skipRemote) {
             cloudCrmState.orderListHtml = orderList.innerHTML;
+            cloudCrmState.orderAttachmentsById = collectOrderAttachmentStateFromDom();
             if (!skipRemote) {
                 scheduleCrmStateSave();
             }
@@ -577,8 +582,14 @@ lucide.createIcons();
         function getCurrentCrmStatePayload() {
             const rawSequence = Number(cloudCrmState.whatsappContactIdSequence || '100100');
             const rawExpertSequence = Number(cloudCrmState.expertIdSequence || '1');
+            const canSnapshotVisibleOrderList = activeOrderTab !== 'expert'
+                && activeOrderTab !== 'monthly'
+                && Array.from(orderList.querySelectorAll('.order-card')).some((card) => !card.classList.contains('expert-card'));
             return {
-                orderListHtml: orderList.innerHTML || '',
+                orderListHtml: canSnapshotVisibleOrderList ? (orderList.innerHTML || '') : (cloudCrmState.orderListHtml || ''),
+                orderAttachmentsById: canSnapshotVisibleOrderList
+                    ? collectOrderAttachmentStateFromDom()
+                    : (cloudCrmState.orderAttachmentsById && typeof cloudCrmState.orderAttachmentsById === 'object' ? cloudCrmState.orderAttachmentsById : {}),
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
                 agentRoster: readAgentRosterFromStorage(),
@@ -593,11 +604,12 @@ lucide.createIcons();
             if (!state || typeof state !== 'object') return false;
             const orderHtml = typeof state.orderListHtml === 'string' ? state.orderListHtml : '';
             const hasOrders = /order-card/.test(orderHtml);
+            const hasOrderAttachments = state.orderAttachmentsById && Object.keys(state.orderAttachmentsById).length > 0;
             const hasManualContacts = Array.isArray(state.manualContacts) && state.manualContacts.length > 0;
             const hasExperts = Array.isArray(state.experts) && state.experts.length > 0;
             const hasContactMap = state.whatsappContactIdMap && Object.keys(state.whatsappContactIdMap).length > 0;
             const hasReadState = state.whatsappReadState && Object.keys(state.whatsappReadState).length > 0;
-            return Boolean(hasOrders || hasManualContacts || hasExperts || hasContactMap || hasReadState);
+            return Boolean(hasOrders || hasOrderAttachments || hasManualContacts || hasExperts || hasContactMap || hasReadState);
         }
 
         function hasMeaningfulLocalCrmState() {
@@ -662,11 +674,54 @@ lucide.createIcons();
             applyOrderSearchFilter();
         }
 
+        function getOrderAttachmentStateKey(card) {
+            if (!card) return '';
+            return String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim();
+        }
+
+        function collectOrderAttachmentStateFromDom() {
+            const next = {};
+            Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
+                if (card.classList.contains('expert-card')) return;
+                const orderId = getOrderAttachmentStateKey(card);
+                if (!orderId) return;
+                next[orderId] = {
+                    questionAttachments: String(card.dataset.questionAttachments || '[]'),
+                    solutionAttachments: String(card.dataset.solutionAttachments || '[]'),
+                    customOrderFolders: String(card.dataset.customOrderFolders || '[]'),
+                    customOrderFiles: String(card.dataset.customOrderFiles || '[]')
+                };
+            });
+            return next;
+        }
+
+        function applyOrderAttachmentStateToCard(card) {
+            if (!card) return;
+            const orderId = getOrderAttachmentStateKey(card);
+            if (!orderId) return;
+            const state = cloudCrmState.orderAttachmentsById && typeof cloudCrmState.orderAttachmentsById === 'object'
+                ? cloudCrmState.orderAttachmentsById[orderId]
+                : null;
+            if (!state || typeof state !== 'object') return;
+            if (typeof state.questionAttachments === 'string') card.dataset.questionAttachments = state.questionAttachments;
+            if (typeof state.solutionAttachments === 'string') card.dataset.solutionAttachments = state.solutionAttachments;
+            if (typeof state.customOrderFolders === 'string') card.dataset.customOrderFolders = state.customOrderFolders;
+            if (typeof state.customOrderFiles === 'string') card.dataset.customOrderFiles = state.customOrderFiles;
+        }
+
+        function applyOrderAttachmentStateToOrderList() {
+            Array.from(orderList.querySelectorAll('.order-card')).forEach((card) => {
+                if (card.classList.contains('expert-card')) return;
+                applyOrderAttachmentStateToCard(card);
+            });
+        }
+
         function applyCrmStateSnapshot(state, options = {}) {
             const includeOrders = options.includeOrders !== false;
             if (!state || typeof state !== 'object') return false;
             const hasRemoteState =
                 typeof state.orderListHtml === 'string' ||
+                (state.orderAttachmentsById && typeof state.orderAttachmentsById === 'object') ||
                 Array.isArray(state.manualContacts) ||
                 (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
                 Number.isFinite(Number(state.whatsappContactIdSequence));
@@ -678,6 +733,9 @@ lucide.createIcons();
             }
 
             cloudCrmState.orderListHtml = typeof state.orderListHtml === 'string' ? state.orderListHtml : '';
+            cloudCrmState.orderAttachmentsById = state.orderAttachmentsById && typeof state.orderAttachmentsById === 'object'
+                ? state.orderAttachmentsById
+                : {};
             cloudCrmState.manualContacts = Array.isArray(state.manualContacts) ? state.manualContacts : [];
             cloudCrmState.experts = Array.isArray(state.experts) ? state.experts : [];
             cloudCrmState.whatsappContactIdMap = state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {};
@@ -687,6 +745,7 @@ lucide.createIcons();
             if (includeOrders) {
                 orderList.innerHTML = '';
                 restoreOrderListFromStorage();
+                applyOrderAttachmentStateToOrderList();
                 rehydrateOrderCardsFromDom();
             }
             writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
@@ -1094,19 +1153,27 @@ lucide.createIcons();
             const now = new Date();
             const cards = Array.from(orderList.querySelectorAll('.order-card'));
             cards.forEach((card) => {
+                if (card.classList.contains('expert-card')) {
+                    card.style.display = 'none';
+                    return;
+                }
                 const cardOrderId = (card.querySelector('.order-id')?.textContent || '').replace('#', '').trim().toLowerCase();
                 const cardClientId = (card.dataset.clientId || '').trim().toLowerCase();
                 const matchesQuery = !query || cardOrderId === query || cardClientId === query;
                 const assignedTo = String(card.dataset.assignedTo || '').trim().toLowerCase();
                 const createdBy = String(card.dataset.createdBy || '').trim().toLowerCase();
                 const mineIdentity = String(agentName || '').trim().toLowerCase();
+                const sourceWaId = normalizeWaId(card.dataset.sourceWaId || '');
+                const sourceContactItem = sourceWaId ? contactList.querySelector(`.contact-item[data-wa-id="${sourceWaId}"]`) : null;
+                const isSourceArchived = String(sourceContactItem?.dataset?.tag || '').trim() === 'archived';
                 const deadlineRaw = card.querySelector('.order-deadline')?.dataset.baseValue || card.querySelector('.order-deadline')?.textContent?.trim() || '';
                 const due = parseCardDateTime(deadlineRaw);
                 const matchesTab = activeOrderTab === 'all'
                     ? true
                     : activeOrderTab === 'expert'
                         ? Boolean(assignedTo) && assignedTo !== mineIdentity
-                        : (createdBy === mineIdentity || assignedTo === mineIdentity || !assignedTo);
+                        : true;
+                const matchesArchiveState = !isSourceArchived;
 
                 let matchesWindow = true;
                 if (windowMs > 0) {
@@ -1125,7 +1192,7 @@ lucide.createIcons();
                     }
                 }
 
-                card.style.display = matchesQuery && matchesWindow && matchesTab ? '' : 'none';
+                card.style.display = matchesQuery && matchesWindow && matchesTab && matchesArchiveState ? '' : 'none';
             });
         }
 
@@ -1156,6 +1223,7 @@ lucide.createIcons();
                 return;
             }
             restoreOrderListFromStorage();
+            applyOrderAttachmentStateToOrderList();
             rehydrateOrderCardsFromDom();
             applyOrderSearchFilter();
         }
@@ -1353,6 +1421,7 @@ lucide.createIcons();
             setTimeout(() => {
                 refreshContactOrder();
                 applyContactFilter();
+                applyOrderSearchFilter();
             }, 0);
         }
 
@@ -1659,7 +1728,7 @@ lucide.createIcons();
 
             if (sendBtn) sendBtn.disabled = !canMessage;
             if (attachFileBtn) attachFileBtn.disabled = !canMessage;
-            if (notifyBtn) notifyBtn.disabled = !canMessage;
+            if (notifyBtn) notifyBtn.disabled = !hasThread || whatsappSendInFlight;
         }
 
         async function assignContactToCurrentAgent(waId) {
@@ -4757,30 +4826,38 @@ lucide.createIcons();
             }, WHATSAPP_DEBUG_POLL_INTERVAL_MS);
         }
 
+        function scheduleWhatsappRealtimeReconnect(delayMs = 2500) {
+            if (whatsappSocketReconnectTimer) return;
+            whatsappSocketReconnectTimer = setTimeout(() => {
+                whatsappSocketReconnectTimer = null;
+                initWhatsappRealtime();
+            }, delayMs);
+        }
+
         async function initWhatsappRealtime() {
+            if (whatsappSocket && (whatsappSocket.readyState === WebSocket.OPEN || whatsappSocket.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
             const baseUrl = await resolveWhatsappApiBase(false);
             if (!baseUrl) {
-                setTimeout(() => {
-                    initWhatsappRealtime();
-                }, 2500);
+                scheduleWhatsappRealtimeReconnect(2500);
                 return;
             }
             const wsUrl = baseUrl.replace(/^http/i, 'ws') + '/ws';
-            let socket;
             try {
-                socket = new WebSocket(wsUrl);
+                whatsappSocket = new WebSocket(wsUrl);
             } catch (err) {
                 console.error('WhatsApp socket init failed:', err);
-                setTimeout(() => {
-                    initWhatsappRealtime();
-                }, 2500);
+                whatsappSocket = null;
+                scheduleWhatsappRealtimeReconnect(2500);
                 return;
             }
-            socket.onopen = () => {
+            whatsappSocket.onopen = () => {
                 whatsappSocketConnected = true;
                 pollWhatsappDebug();
+                void loadWhatsappContacts();
             };
-            socket.onmessage = (event) => {
+            whatsappSocket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'whatsapp_message') {
@@ -4792,12 +4869,16 @@ lucide.createIcons();
                     console.error('Invalid WhatsApp socket payload:', err);
                 }
             };
-            socket.onclose = () => {
+            whatsappSocket.onerror = () => {
                 whatsappSocketConnected = false;
                 pollWhatsappDebug();
-                setTimeout(() => {
-                    initWhatsappRealtime();
-                }, 2500);
+            };
+            whatsappSocket.onclose = () => {
+                whatsappSocketConnected = false;
+                whatsappSocket = null;
+                pollWhatsappDebug();
+                void loadWhatsappContacts();
+                scheduleWhatsappRealtimeReconnect(2500);
             };
         }
 
