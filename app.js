@@ -5809,6 +5809,7 @@ lucide.createIcons();
             }
             const taskTitle = activeNotifyOrderCard.querySelector('.order-title')?.textContent?.trim() || 'Untitled Task';
             const orderId = String(activeNotifyOrderCard.querySelector('.order-id')?.textContent || '').replace('#', '').trim() || 'TBD';
+            const clientId = String(activeNotifyOrderCard.dataset.clientId || '').trim();
             const serviceType = String(activeNotifyOrderCard.dataset.serviceType || '').trim() || taskTitle;
             const expertDeadline = activeNotifyOrderCard.querySelector('.order-expert-deadline')?.dataset.baseValue || activeNotifyOrderCard.querySelector('.order-expert-deadline')?.textContent?.trim() || 'TBD';
             const expertPayout = String(activeNotifyOrderCard.dataset.expertPayout || activeNotifyOrderCard.querySelector('.order-expert-pay')?.textContent || 'TBD').trim() || 'TBD';
@@ -5861,6 +5862,7 @@ lucide.createIcons();
                         },
                         body: JSON.stringify({
                             orderId,
+                            clientId,
                             taskTitle,
                             serviceType,
                             expertDeadline,

@@ -45,6 +45,12 @@ const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
 const cloudinaryFolder = String(process.env.CLOUDINARY_FOLDER || 'unisolvex-crm').trim() || 'unisolvex-crm';
+const frontendAppBaseUrl = String(
+    process.env.PUBLIC_FRONTEND_BASE_URL
+    || process.env.NETLIFY_SITE_URL
+    || process.env.FRONTEND_APP_URL
+    || 'https://unisolvex-crm.netlify.app'
+).trim().replace(/\/+$/, '');
 const aiAgentEnabled = /^(1|true|yes|on)$/i.test(process.env.AI_AGENT_ENABLED || '');
 const aiAgentProvider = String(process.env.AI_AGENT_PROVIDER || 'gemini').trim().toLowerCase();
 const aiAgentModel = String(process.env.AI_AGENT_MODEL || 'gemini-2.5-flash').trim();
@@ -1916,6 +1922,42 @@ function buildExpertNotifyText({ expertName, orderId, taskTitle, serviceType, ex
     return lines.join('\n').trim();
 }
 
+function buildExpertTaskFolderUrl({ orderId, clientId = '', expertWaId = '' }) {
+    const params = new URLSearchParams();
+    params.set('orderId', String(orderId || '').trim() || 'TBD');
+    if (clientId) params.set('clientId', String(clientId || '').trim());
+    if (expertWaId) params.set('expertWaId', normalizeWaId(expertWaId));
+    return `${frontendAppBaseUrl}/expert-task-view.html?${params.toString()}`;
+}
+
+function buildExpertNotifyFollowupText({
+    expertName,
+    orderId,
+    taskTitle,
+    serviceType,
+    expertDeadline,
+    expertPayout,
+    sessionStart,
+    sessionDuration,
+    taskFolderUrl
+}) {
+    return [
+        `Hello ${expertName || 'there'},`,
+        '',
+        'Task details:',
+        `Order ID: ${orderId || 'TBD'}`,
+        `Subject/Topic: ${taskTitle || 'Untitled Task'}`,
+        `Service: ${serviceType || 'General'}`,
+        `Date/Time: ${sessionStart || expertDeadline || 'TBD'}`,
+        `Duration: ${sessionDuration || 'TBD'}`,
+        `Payout: ${expertPayout || 'TBD'}`,
+        '',
+        `Open Task Folder: ${taskFolderUrl}`,
+        '',
+        'Please review the folder and reply if you are interested.'
+    ].join('\n').trim();
+}
+
 function renderExpertNotifyTemplatePreview(valuesByKey) {
     return String(expertNotifyTemplatePreviewText || '')
         .replace(/\{\{\s*expertName\s*\}\}/gi, String(valuesByKey.expertName || '').trim() || 'there')
@@ -2943,6 +2985,7 @@ app.post('/api/whatsapp/expert-notify-preview', (req, res) => {
 
 app.post('/api/whatsapp/expert-notify', async (req, res) => {
     const orderId = String(req.body?.orderId || '').trim() || 'TBD';
+    const clientId = String(req.body?.clientId || '').trim();
     const taskTitle = String(req.body?.taskTitle || '').trim() || 'Untitled Task';
     const serviceType = String(req.body?.serviceType || '').trim() || 'General';
     const expertDeadline = String(req.body?.expertDeadline || '').trim() || 'TBD';
@@ -2999,6 +3042,11 @@ app.post('/api/whatsapp/expert-notify', async (req, res) => {
                     sessionDuration,
                     taskFileCount: taskFileLinks.length
                 });
+                const taskFolderUrl = buildExpertTaskFolderUrl({
+                    orderId,
+                    clientId,
+                    expertWaId: waId
+                });
 
                 if (notifyResult.messageType === 'template') {
                     const profileName = contactsByWaId.get(waId)?.profileName || expertName || waId;
@@ -3035,24 +3083,29 @@ app.post('/api/whatsapp/expert-notify', async (req, res) => {
                     });
                 }
 
-                if (taskFileLinks.length) {
-                    const linksText = [
-                        `Task files for ${taskTitle}:`,
-                        ...taskFileLinks.map((link, index) => `${index + 1}. ${link}`)
-                    ].join('\n');
-                    await sendWhatsappTextMessage({
-                        waId,
-                        text: linksText,
-                        senderType: 'human',
-                        route: 'expert-notify-files'
-                    });
-                }
+                await sendWhatsappTextMessage({
+                    waId,
+                    text: buildExpertNotifyFollowupText({
+                        expertName,
+                        orderId,
+                        taskTitle,
+                        serviceType,
+                        expertDeadline,
+                        expertPayout,
+                        sessionStart,
+                        sessionDuration,
+                        taskFolderUrl
+                    }),
+                    senderType: 'human',
+                    route: 'expert-notify-details'
+                });
 
                 successes.push({
                     expertId,
                     expertName,
                     waId,
-                    messageType: notifyResult.messageType
+                    messageType: notifyResult.messageType,
+                    taskFolderUrl
                 });
             } catch (error) {
                 failures.push({
