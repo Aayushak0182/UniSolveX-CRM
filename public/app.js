@@ -5089,11 +5089,11 @@ lucide.createIcons();
                 alert('Select an agent first.');
                 return;
             }
-            setCurrentAgentName(nextName);
             try {
                 if (assignAgentModalMode === 'single' && assignAgentModalWaId) {
                     await assignContactToAgent(assignAgentModalWaId, nextName);
                 } else {
+                    setCurrentAgentName(nextName);
                     await assignAllChatsToAgent(nextName);
                 }
                 closeAssignAgentModal();
