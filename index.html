@@ -6,7 +6,10 @@
     <title>UniSolveX | Admin CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+
     <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
     <link rel="shortcut icon" href="/favicon.ico?v=2">
     <link rel="stylesheet" href="styles.css">
@@ -39,10 +42,14 @@
                     </button>
                 </div>
             </div>
-            <div class="brand-mark">
-                <img src="/favicon.ico?v=2" alt="UniSolveX" class="brand-mark-icon">
+            <div class="brand-mark" aria-hidden="true">
+                <span class="brand-shield"></span>
+                <span class="brand-monogram">U</span>
             </div>
-            <span class="brand-wordmark font-bold text-xl text-gray-800">UniSolveX <span class="brand-wordmark-accent text-indigo-600">CRM</span></span>
+            <span class="brand-wordmark font-bold text-xl text-gray-800">
+                <span class="brand-wordmark-main">UniSolve<span class="brand-wordmark-x">X</span></span>
+                <span class="brand-wordmark-accent">CRM</span>
+            </span>
         </div>
         <div class="flex items-center gap-3 border-l pl-4">
             <div id="adminServerStatusPanel" class="text-right leading-tight">
@@ -557,11 +564,46 @@
                     </div>
                     <button id="saveOrderDetailsBtn" class="w-full py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Changes</button>
                     <div class="pt-2 grid grid-cols-1 gap-2">
+                        <button id="generatePaymentLinkBtn" type="button" class="w-full py-2 text-sm font-medium border border-violet-200 text-violet-800 bg-violet-50 rounded-md hover:bg-violet-100">Generate Payment Link</button>
                         <button id="openAttachmentPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100">Attachment</button>
                         <button id="openManageExpertPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-amber-200 text-amber-800 bg-amber-50 rounded-md hover:bg-amber-100">Manage Expert</button>
                         <button id="openRecordTransactionBtn" type="button" class="w-full py-2 text-sm font-medium border border-emerald-200 text-emerald-800 bg-emerald-50 rounded-md hover:bg-emerald-100">Record Transaction</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="paymentLinkModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl shadow-2xl w-[520px] max-w-[95vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Payment Link</h3>
+                    <p class="text-xs text-gray-500">Razorpay link, payment status, and expiry details.</p>
+                </div>
+                <button id="closePaymentLinkModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="payment-link-panel">
+                <div class="payment-link-panel-head">
+                    <div>
+                        <p class="payment-link-title">Payment Amount</p>
+                        <p id="odPaymentLinkAmount" class="payment-link-amount">No amount set</p>
+                    </div>
+                    <span id="odPaymentLinkStatusBadge" class="payment-link-badge is-muted">Not Generated</span>
+                </div>
+                <div class="payment-link-meta">
+                    <span>Received: <strong id="odPaymentLinkReceivedText">No</strong></span>
+                    <span>Validity: <strong id="odPaymentLinkValidityText">-</strong></span>
+                </div>
+                <div class="payment-link-controls">
+                    <button id="openRazorpayLinkBtn" type="button" class="payment-link-secondary" disabled>Razorpay Link</button>
+                </div>
+                <select id="odPaymentLinkReceivedStatus" class="payment-link-select">
+                    <option value="not_received">Payment Not Received</option>
+                    <option value="partial">Received - Partial Paid</option>
+                    <option value="complete">Received - Fully Paid</option>
+                </select>
+                <p id="odPaymentLinkUrlText" class="payment-link-url">No link yet.</p>
             </div>
         </div>
     </div>

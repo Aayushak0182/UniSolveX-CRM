@@ -125,6 +125,16 @@ lucide.createIcons();
         const odActualDeadlineInput = document.getElementById('odActualDeadline');
         const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
         const odExpertPaymentStatusInput = document.getElementById('odExpertPaymentStatus');
+        const generatePaymentLinkBtn = document.getElementById('generatePaymentLinkBtn');
+        const paymentLinkModal = document.getElementById('paymentLinkModal');
+        const closePaymentLinkModalBtn = document.getElementById('closePaymentLinkModalBtn');
+        const openRazorpayLinkBtn = document.getElementById('openRazorpayLinkBtn');
+        const odPaymentLinkReceivedStatus = document.getElementById('odPaymentLinkReceivedStatus');
+        const odPaymentLinkAmount = document.getElementById('odPaymentLinkAmount');
+        const odPaymentLinkStatusBadge = document.getElementById('odPaymentLinkStatusBadge');
+        const odPaymentLinkReceivedText = document.getElementById('odPaymentLinkReceivedText');
+        const odPaymentLinkValidityText = document.getElementById('odPaymentLinkValidityText');
+        const odPaymentLinkUrlText = document.getElementById('odPaymentLinkUrlText');
         const openAttachmentPageBtn = document.getElementById('openAttachmentPageBtn');
         const openManageExpertPageBtn = document.getElementById('openManageExpertPageBtn');
         const openRecordTransactionBtn = document.getElementById('openRecordTransactionBtn');
@@ -260,6 +270,8 @@ lucide.createIcons();
         const cloudCrmState = {
             orderListHtml: '',
             orderAttachmentsById: {},
+            suppressedAiTaskCards: [],
+            razorpayPaymentsByOrder: {},
             manualContacts: [],
             experts: [],
             agentRoster: [],
@@ -589,6 +601,10 @@ lucide.createIcons();
                 orderAttachmentsById: cloudCrmState.orderAttachmentsById && typeof cloudCrmState.orderAttachmentsById === 'object'
                     ? cloudCrmState.orderAttachmentsById
                     : {},
+                suppressedAiTaskCards: Array.isArray(cloudCrmState.suppressedAiTaskCards) ? cloudCrmState.suppressedAiTaskCards : [],
+                razorpayPaymentsByOrder: cloudCrmState.razorpayPaymentsByOrder && typeof cloudCrmState.razorpayPaymentsByOrder === 'object'
+                    ? cloudCrmState.razorpayPaymentsByOrder
+                    : {},
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
                 agentRoster: readAgentRosterFromStorage(),
@@ -604,11 +620,13 @@ lucide.createIcons();
             const orderHtml = typeof state.orderListHtml === 'string' ? state.orderListHtml : '';
             const hasOrders = /order-card/.test(orderHtml);
             const hasOrderAttachments = state.orderAttachmentsById && Object.keys(state.orderAttachmentsById).length > 0;
+            const hasSuppressedAiCards = Array.isArray(state.suppressedAiTaskCards) && state.suppressedAiTaskCards.length > 0;
+            const hasRazorpayPayments = state.razorpayPaymentsByOrder && Object.keys(state.razorpayPaymentsByOrder).length > 0;
             const hasManualContacts = Array.isArray(state.manualContacts) && state.manualContacts.length > 0;
             const hasExperts = Array.isArray(state.experts) && state.experts.length > 0;
             const hasContactMap = state.whatsappContactIdMap && Object.keys(state.whatsappContactIdMap).length > 0;
             const hasReadState = state.whatsappReadState && Object.keys(state.whatsappReadState).length > 0;
-            return Boolean(hasOrders || hasOrderAttachments || hasManualContacts || hasExperts || hasContactMap || hasReadState);
+            return Boolean(hasOrders || hasOrderAttachments || hasSuppressedAiCards || hasRazorpayPayments || hasManualContacts || hasExperts || hasContactMap || hasReadState);
         }
 
         function hasMeaningfulLocalCrmState() {
@@ -758,6 +776,8 @@ lucide.createIcons();
             const hasRemoteState =
                 typeof state.orderListHtml === 'string' ||
                 (state.orderAttachmentsById && typeof state.orderAttachmentsById === 'object') ||
+                Array.isArray(state.suppressedAiTaskCards) ||
+                (state.razorpayPaymentsByOrder && typeof state.razorpayPaymentsByOrder === 'object') ||
                 Array.isArray(state.manualContacts) ||
                 (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
                 Number.isFinite(Number(state.whatsappContactIdSequence));
@@ -772,6 +792,8 @@ lucide.createIcons();
             cloudCrmState.orderAttachmentsById = state.orderAttachmentsById && typeof state.orderAttachmentsById === 'object'
                 ? state.orderAttachmentsById
                 : {};
+            cloudCrmState.suppressedAiTaskCards = Array.isArray(state.suppressedAiTaskCards) ? state.suppressedAiTaskCards : [];
+            cloudCrmState.razorpayPaymentsByOrder = state.razorpayPaymentsByOrder && typeof state.razorpayPaymentsByOrder === 'object' ? state.razorpayPaymentsByOrder : {};
             cloudCrmState.manualContacts = Array.isArray(state.manualContacts) ? state.manualContacts : [];
             cloudCrmState.experts = Array.isArray(state.experts) ? state.experts : [];
             cloudCrmState.whatsappContactIdMap = state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {};
@@ -784,6 +806,7 @@ lucide.createIcons();
                 applyOrderAttachmentStateToOrderList();
                 rehydrateOrderCardsFromDom();
             }
+            applyRazorpayPaymentUpdates(cloudCrmState.razorpayPaymentsByOrder);
             writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
             setWhatsappContactIdSequenceInStorage(
                 Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
@@ -2041,6 +2064,7 @@ lucide.createIcons();
             const draft = readOrderDetailsDrafts()[getActiveOrderDraftKey(card)];
             applyOrderDetailsDraft(draft);
             updateOrderDetailsSummary(card);
+            renderPaymentLinkPanel(card);
             document.body.classList.add('modal-open');
             orderDetailsModal.classList.remove('hidden');
             const scrollArea = document.getElementById('orderDetailsScrollArea');
@@ -2783,6 +2807,158 @@ lucide.createIcons();
             return Number.isFinite(parsed) ? parsed : 0;
         }
 
+        function formatPaymentAmount(currency, amount) {
+            const cleanCurrency = String(currency || 'INR').trim().toUpperCase() || 'INR';
+            const cleanAmount = String(amount || '').trim();
+            return cleanAmount ? `${cleanCurrency} ${cleanAmount}` : 'No amount set';
+        }
+
+        function getPaymentLinkAmountFromForm() {
+            return {
+                currency: String(document.getElementById('odBaseCurrency')?.value || 'INR').trim().toUpperCase() || 'INR',
+                amount: String(document.getElementById('odBaseAmountValue')?.value || '').trim()
+            };
+        }
+
+        function getPaymentLinkState(card = activeOrderCard) {
+            if (!card) {
+                return { id: '', url: '', amount: '', amountPaid: '', currency: 'INR', status: 'not_generated', receivedStatus: 'not_received', expiresAt: '', createdAt: '' };
+            }
+            return {
+                id: String(card.dataset.paymentLinkId || '').trim(),
+                url: String(card.dataset.paymentLinkUrl || '').trim(),
+                amount: String(card.dataset.paymentLinkAmount || '').trim(),
+                amountPaid: String(card.dataset.paymentLinkAmountPaid || '').trim(),
+                currency: String(card.dataset.paymentLinkCurrency || 'INR').trim().toUpperCase() || 'INR',
+                status: String(card.dataset.paymentLinkStatus || '').trim() || 'not_generated',
+                receivedStatus: String(card.dataset.paymentLinkReceivedStatus || 'not_received').trim() || 'not_received',
+                expiresAt: String(card.dataset.paymentLinkExpiresAt || '').trim(),
+                createdAt: String(card.dataset.paymentLinkCreatedAt || '').trim()
+            };
+        }
+
+        function getOrderCardById(orderId) {
+            const target = String(orderId || '').replace('#', '').trim();
+            if (!target) return null;
+            return Array.from(orderList.querySelectorAll('.order-card'))
+                .find((card) => String(card.querySelector('.order-id')?.textContent || '').replace('#', '').trim() === target) || null;
+        }
+
+        function isPaymentLinkExpired(state) {
+            const expires = new Date(state?.expiresAt || 0).getTime();
+            return Boolean(expires && Date.now() > expires);
+        }
+
+        function getPaymentLinkDisplayStatus(state) {
+            if (!state?.url) return 'not_generated';
+            if (state.receivedStatus === 'complete') return 'paid_full';
+            if (state.receivedStatus === 'partial') return 'paid_partial';
+            return isPaymentLinkExpired(state) ? 'expired' : 'active';
+        }
+
+        function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
+            const query = new URLSearchParams({
+                amount: String(amount || ''),
+                currency: String(currency || 'INR').toUpperCase(),
+                order_id: String(orderId || ''),
+                client_id: String(clientId || '')
+            });
+            return `https://rzp.io/i/unisolvex-${encodeURIComponent(String(orderId || clientId || Date.now()))}?${query.toString()}`;
+        }
+
+        function syncPaymentReceivedToOrder(card, receivedStatus) {
+            if (!card) return;
+            const state = getPaymentLinkState(card);
+            const total = parseAmountToNumber(state.amount || card.querySelector('.order-amount')?.textContent || '');
+            if (receivedStatus === 'complete') {
+                card.dataset.clientPaidCurrency = state.currency || card.dataset.clientPaidCurrency || 'INR';
+                card.dataset.clientPaidAmount = state.amountPaid || state.amount || String(total || '');
+                card.dataset.paymentStatusOverride = 'complete';
+            } else if (receivedStatus === 'partial') {
+                card.dataset.clientPaidCurrency = state.currency || card.dataset.clientPaidCurrency || 'INR';
+                card.dataset.clientPaidAmount = state.amountPaid || card.dataset.clientPaidAmount || (total ? String(Math.max(1, Math.floor(total / 2))) : '');
+                card.dataset.paymentStatusOverride = 'partial';
+            } else {
+                card.dataset.paymentStatusOverride = 'auto';
+            }
+            syncOrderPaymentIndicator(card);
+            updateOrderDetailsSummary(card);
+        }
+
+        function applyRazorpayPaymentUpdates(map) {
+            if (!map || typeof map !== 'object') return;
+            Object.values(map).forEach((row) => {
+                const orderId = String(row?.orderId || '').trim();
+                const card = getOrderCardById(orderId);
+                if (!card) return;
+                if (row.paymentLinkId) card.dataset.paymentLinkId = String(row.paymentLinkId || '');
+                if (row.shortUrl) card.dataset.paymentLinkUrl = String(row.shortUrl || '');
+                if (row.amount) card.dataset.paymentLinkAmount = String(row.amount || '');
+                if (row.amountPaid) card.dataset.paymentLinkAmountPaid = String(row.amountPaid || '');
+                if (row.currency) card.dataset.paymentLinkCurrency = String(row.currency || 'INR').toUpperCase();
+                if (row.status) card.dataset.paymentLinkStatus = String(row.status || '');
+                if (row.receivedStatus) card.dataset.paymentLinkReceivedStatus = String(row.receivedStatus || 'not_received');
+                if (row.updatedAt) card.dataset.paymentLinkUpdatedAt = String(row.updatedAt || '');
+                if (row.receivedStatus === 'partial' || row.receivedStatus === 'complete') {
+                    syncPaymentReceivedToOrder(card, row.receivedStatus);
+                } else {
+                    renderPaymentLinkPanel(card);
+                }
+            });
+            if (activeOrderCard) {
+                renderPaymentLinkPanel(activeOrderCard);
+            }
+        }
+
+        function renderPaymentLinkPanel(card = activeOrderCard) {
+            if (!odPaymentLinkAmount || !odPaymentLinkStatusBadge) return;
+            const formAmount = getPaymentLinkAmountFromForm();
+            const state = getPaymentLinkState(card);
+            const displayStatus = getPaymentLinkDisplayStatus(state);
+            const amountText = state.url
+                ? formatPaymentAmount(state.currency, state.amount)
+                : formatPaymentAmount(formAmount.currency, formAmount.amount);
+            const statusMap = {
+                not_generated: ['Not Generated', 'is-muted'],
+                active: ['Active', 'is-active'],
+                expired: ['Expired', 'is-expired'],
+                paid_partial: ['Received Partial', 'is-partial'],
+                paid_full: ['Received Full', 'is-paid']
+            };
+            const [label, tone] = statusMap[displayStatus] || statusMap.not_generated;
+            odPaymentLinkAmount.textContent = amountText;
+            odPaymentLinkStatusBadge.textContent = label;
+            odPaymentLinkStatusBadge.className = `payment-link-badge ${tone}`;
+            if (odPaymentLinkReceivedText) {
+                odPaymentLinkReceivedText.textContent = state.receivedStatus === 'complete'
+                    ? 'Full'
+                    : state.receivedStatus === 'partial'
+                        ? 'Partial'
+                        : 'No';
+            }
+            if (odPaymentLinkValidityText) {
+                odPaymentLinkValidityText.textContent = !state.url
+                    ? '-'
+                    : displayStatus === 'expired'
+                        ? 'Expired'
+                        : displayStatus === 'active'
+                            ? 'Active till ' + (formatDateTimeForCard(state.expiresAt) || '-')
+                            : 'Payment received';
+            }
+            if (odPaymentLinkReceivedStatus) odPaymentLinkReceivedStatus.value = state.receivedStatus || 'not_received';
+            if (openRazorpayLinkBtn) openRazorpayLinkBtn.disabled = !state.url;
+            if (odPaymentLinkUrlText) odPaymentLinkUrlText.textContent = state.url || 'No link yet.';
+        }
+
+        function openPaymentLinkModal() {
+            renderPaymentLinkPanel(activeOrderCard);
+            paymentLinkModal?.classList.remove('hidden');
+        }
+
+        function closePaymentLinkModal() {
+            paymentLinkModal?.classList.add('hidden');
+        }
+
         function syncOrderPaymentIndicator(card) {
             const amountEl = card.querySelector('.order-amount');
             if (!amountEl) return;
@@ -3019,6 +3195,21 @@ lucide.createIcons();
             if (!card) return;
             const unique = Array.from(new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean)));
             card.dataset.notifiedExperts = JSON.stringify(unique);
+        }
+
+        function getSuppressedAiTaskCardIds() {
+            return Array.isArray(cloudCrmState.suppressedAiTaskCards) ? cloudCrmState.suppressedAiTaskCards : [];
+        }
+
+        function isAiTaskCardSuppressed(summaryMessageId) {
+            const id = String(summaryMessageId || '').trim();
+            return Boolean(id && getSuppressedAiTaskCardIds().includes(id));
+        }
+
+        function suppressAiTaskCard(card) {
+            const id = String(card?.dataset?.aiSummaryMessageId || '').trim();
+            if (!id) return;
+            cloudCrmState.suppressedAiTaskCards = Array.from(new Set([...getSuppressedAiTaskCardIds(), id]));
         }
 
         function getInterestedExpertIds(card) {
@@ -5089,11 +5280,11 @@ lucide.createIcons();
                 alert('Select an agent first.');
                 return;
             }
-            setCurrentAgentName(nextName);
             try {
                 if (assignAgentModalMode === 'single' && assignAgentModalWaId) {
                     await assignContactToAgent(assignAgentModalWaId, nextName);
                 } else {
+                    setCurrentAgentName(nextName);
                     await assignAllChatsToAgent(nextName);
                 }
                 closeAssignAgentModal();
@@ -5304,6 +5495,15 @@ lucide.createIcons();
             card.dataset.customOrderFolders = '[]';
             card.dataset.customOrderFiles = '[]';
             card.dataset.transactionRecords = '[]';
+            card.dataset.paymentLinkId = '';
+            card.dataset.paymentLinkUrl = '';
+            card.dataset.paymentLinkAmount = '';
+            card.dataset.paymentLinkAmountPaid = '';
+            card.dataset.paymentLinkCurrency = 'INR';
+            card.dataset.paymentLinkStatus = 'not_generated';
+            card.dataset.paymentLinkReceivedStatus = 'not_received';
+            card.dataset.paymentLinkCreatedAt = '';
+            card.dataset.paymentLinkExpiresAt = '';
             card.dataset.assignedExperts = '[]';
             card.dataset.assignedExpertName = '';
             card.dataset.assignedExpertId = '';
@@ -5432,6 +5632,9 @@ lucide.createIcons();
             if (thread.indexOf(confirmationMessage) < summaryMessage.index) return false;
             if (!summaryMessage.parsed.summaryMessageId) return false;
             if (Array.from(orderList.querySelectorAll('.order-card')).some((card) => String(card.dataset.aiSummaryMessageId || '') === summaryMessage.parsed.summaryMessageId)) {
+                return false;
+            }
+            if (isAiTaskCardSuppressed(summaryMessage.parsed.summaryMessageId)) {
                 return false;
             }
 
@@ -5595,6 +5798,7 @@ lucide.createIcons();
             const serviceType = document.getElementById('odServiceType').value.trim();
             const status = document.getElementById('odStatus').value.trim();
             if (status.toLowerCase() === 'archive') {
+                suppressAiTaskCard(activeOrderCard);
                 activeOrderCard.remove();
                 clearOrderDraft(activeOrderCard);
                 persistOrderListToStorage();
@@ -5622,6 +5826,7 @@ lucide.createIcons();
             const clientPaidCurrency = document.getElementById('odClientPaidCurrency').value.trim() || 'INR';
             const clientPaidAmount = document.getElementById('odClientPaidAmount').value.trim();
             const paymentStatusOverride = document.getElementById('odPaymentStatusOverride').value.trim() || 'auto';
+            const paymentLinkReceivedStatus = String(odPaymentLinkReceivedStatus?.value || activeOrderCard.dataset.paymentLinkReceivedStatus || 'not_received').trim() || 'not_received';
             const expertPaymentStatus = (odExpertPaymentStatusInput?.value || 'pending').trim() || 'pending';
             const sessionStart = document.getElementById('odSessionStart').value.trim();
             const sessionDuration = document.getElementById('odSessionDuration').value.trim();
@@ -5638,6 +5843,12 @@ lucide.createIcons();
             activeOrderCard.dataset.clientPaidCurrency = clientPaidCurrency;
             activeOrderCard.dataset.clientPaidAmount = clientPaidAmount;
             activeOrderCard.dataset.paymentStatusOverride = paymentStatusOverride;
+            activeOrderCard.dataset.paymentLinkReceivedStatus = paymentLinkReceivedStatus;
+            if (activeOrderCard.dataset.paymentLinkUrl) {
+                activeOrderCard.dataset.paymentLinkAmount = baseAmountValue;
+                activeOrderCard.dataset.paymentLinkCurrency = baseCurrency;
+            }
+            syncPaymentReceivedToOrder(activeOrderCard, paymentLinkReceivedStatus);
             activeOrderCard.dataset.expertPaymentStatus = expertPaymentStatus;
             activeOrderCard.dataset.updatedAt = new Date().toISOString();
             syncOrderPaymentIndicator(activeOrderCard);
@@ -5696,6 +5907,85 @@ lucide.createIcons();
         });
         openRecordTransactionBtn?.addEventListener('click', function() {
             openTransactionRecordsModal();
+        });
+        generatePaymentLinkBtn?.addEventListener('click', async function() {
+            if (!activeOrderCard) return;
+            const { currency, amount } = getPaymentLinkAmountFromForm();
+            if (!parseAmountToNumber(amount)) {
+                alert('Base amount fill karo, phir payment link generate hoga.');
+                return;
+            }
+            const identity = getOrderRecordIdentity(activeOrderCard);
+            if (!identity.orderId) {
+                alert('Order ID not found.');
+                return;
+            }
+            if (activeOrderCard.dataset.paymentLinkUrl) {
+                openPaymentLinkModal();
+                return;
+            }
+            const originalText = generatePaymentLinkBtn.textContent;
+            generatePaymentLinkBtn.disabled = true;
+            generatePaymentLinkBtn.textContent = 'Generating...';
+            try {
+                const response = await whatsappFetch('/api/razorpay/payment-link', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        orderId: identity.orderId,
+                        clientId: identity.clientId,
+                        currency,
+                        amount
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data?.paymentLink?.shortUrl) {
+                    throw new Error(data?.error || 'Razorpay payment link create nahi ho paya.');
+                }
+                const link = data.paymentLink;
+                activeOrderCard.dataset.paymentLinkId = link.id || '';
+                activeOrderCard.dataset.paymentLinkUrl = link.shortUrl || '';
+                activeOrderCard.dataset.paymentLinkAmount = link.amount || amount;
+                activeOrderCard.dataset.paymentLinkAmountPaid = '';
+                activeOrderCard.dataset.paymentLinkCurrency = link.currency || currency;
+                activeOrderCard.dataset.paymentLinkStatus = link.status || 'created';
+                activeOrderCard.dataset.paymentLinkReceivedStatus = 'not_received';
+                activeOrderCard.dataset.paymentLinkCreatedAt = new Date().toISOString();
+                activeOrderCard.dataset.paymentLinkExpiresAt = link.expiresAt || '';
+                renderPaymentLinkPanel(activeOrderCard);
+                persistOrderListToStorage();
+                openPaymentLinkModal();
+            } catch (error) {
+                alert((error?.message || 'Razorpay payment link create nahi ho paya.') + '\n\nRazorpay setup ke liye Key ID, Key Secret, Webhook Secret, aur live backend URL chahiye.');
+            } finally {
+                generatePaymentLinkBtn.disabled = false;
+                generatePaymentLinkBtn.textContent = originalText;
+            }
+        });
+        openRazorpayLinkBtn?.addEventListener('click', function() {
+            const url = getPaymentLinkState(activeOrderCard).url;
+            if (!url) return;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        });
+        odPaymentLinkReceivedStatus?.addEventListener('change', function() {
+            if (!activeOrderCard) return;
+            activeOrderCard.dataset.paymentLinkReceivedStatus = String(this.value || 'not_received');
+            syncPaymentReceivedToOrder(activeOrderCard, activeOrderCard.dataset.paymentLinkReceivedStatus);
+            renderPaymentLinkPanel(activeOrderCard);
+            persistOrderListToStorage();
+        });
+        closePaymentLinkModalBtn?.addEventListener('click', closePaymentLinkModal);
+        paymentLinkModal?.addEventListener('click', function(event) {
+            if (event.target !== paymentLinkModal) return;
+            closePaymentLinkModal();
+        });
+        ['odBaseCurrency', 'odBaseAmountValue'].forEach((id) => {
+            document.getElementById(id)?.addEventListener('input', function() {
+                renderPaymentLinkPanel(activeOrderCard);
+            });
+            document.getElementById(id)?.addEventListener('change', function() {
+                renderPaymentLinkPanel(activeOrderCard);
+            });
         });
         closeManageExpertsModalBtn?.addEventListener('click', closeManageExpertsModal);
         manageExpertsModal?.addEventListener('click', function(event) {

@@ -63,6 +63,9 @@ const aiAgentServiceCatalog = String(process.env.AI_AGENT_SERVICE_CATALOG || '')
 const aiAgentToneGuide = String(process.env.AI_AGENT_TONE_GUIDE || 'Professional, polished, concise, respectful, confident, and clear.').trim();
 const aiAgentLanguagePolicy = String(process.env.AI_AGENT_LANGUAGE_POLICY || 'Reply in the client\'s language whenever possible. If the client writes in Hindi, reply in professional Hinglish. If the client writes in English, reply in English. If the client mixes Hindi and English, reply naturally in professional Hinglish. If the language is unclear, use simple professional English.').trim();
 const aiAgentMaxRepliesPerLead = Math.max(1, Number(process.env.AI_AGENT_MAX_REPLIES_PER_LEAD || 12) || 12);
+const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
+const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
+const razorpayWebhookSecret = String(process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
 const aiAgentAlwaysActiveWaIds = new Set(
     String(process.env.AI_AGENT_ALWAYS_ACTIVE_WA_IDS || '')
         .split(',')
@@ -94,11 +97,13 @@ const aiReplyQueueByWaId = new Map();
 const crmState = {
     orderListHtml: '',
     orderAttachmentsById: {},
+    suppressedAiTaskCards: [],
     manualContacts: [],
     experts: [],
     agentRoster: [],
     whatsappContactIdMap: {},
     whatsappReadState: {},
+    razorpayPaymentsByOrder: {},
     whatsappContactIdSequence: 100100,
     expertIdSequence: 1,
     updatedAt: ''
@@ -646,6 +651,33 @@ function normalizeCrmStatePayload(payload = {}) {
                 .filter(([key, value]) => key && value)
         )
         : crmState.whatsappReadState;
+    const nextSuppressedAiTaskCards = Array.isArray(payload.suppressedAiTaskCards)
+        ? Array.from(new Set(payload.suppressedAiTaskCards.map((value) => String(value || '').trim()).filter(Boolean)))
+        : crmState.suppressedAiTaskCards;
+    const nextRazorpayPayments = payload.razorpayPaymentsByOrder && typeof payload.razorpayPaymentsByOrder === 'object'
+        ? Object.fromEntries(
+            Object.entries(payload.razorpayPaymentsByOrder)
+                .map(([key, value]) => {
+                    const orderId = String(key || '').trim();
+                    if (!orderId || !value || typeof value !== 'object') return null;
+                    return [orderId, {
+                        orderId,
+                        clientId: String(value.clientId || '').trim(),
+                        paymentLinkId: String(value.paymentLinkId || '').trim(),
+                        paymentId: String(value.paymentId || '').trim(),
+                        shortUrl: String(value.shortUrl || '').trim(),
+                        currency: String(value.currency || 'INR').trim().toUpperCase() || 'INR',
+                        amount: String(value.amount || '').trim(),
+                        amountPaid: String(value.amountPaid || '').trim(),
+                        receivedStatus: String(value.receivedStatus || 'not_received').trim(),
+                        status: String(value.status || '').trim(),
+                        event: String(value.event || '').trim(),
+                        updatedAt: String(value.updatedAt || '').trim()
+                    }];
+                })
+                .filter(Boolean)
+        )
+        : crmState.razorpayPaymentsByOrder;
     const nextSequence = Number(payload.whatsappContactIdSequence);
     const nextExpertSequence = Number(payload.expertIdSequence);
     const nextExperts = Array.isArray(payload.experts)
@@ -671,11 +703,13 @@ function normalizeCrmStatePayload(payload = {}) {
     return {
         orderListHtml: typeof payload.orderListHtml === 'string' ? payload.orderListHtml : crmState.orderListHtml,
         orderAttachmentsById: nextOrderAttachments,
+        suppressedAiTaskCards: nextSuppressedAiTaskCards,
         manualContacts: nextManualContacts,
         experts: nextExperts,
         agentRoster: nextAgentRoster,
         whatsappContactIdMap: nextContactIdMap,
         whatsappReadState: nextReadState,
+        razorpayPaymentsByOrder: nextRazorpayPayments,
         whatsappContactIdSequence: Number.isFinite(nextSequence) && nextSequence > 0
             ? nextSequence
             : crmState.whatsappContactIdSequence,
@@ -698,11 +732,13 @@ async function loadPersistedCrmState() {
     const nextState = normalizeCrmStatePayload(data);
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.orderAttachmentsById = nextState.orderAttachmentsById;
+    crmState.suppressedAiTaskCards = nextState.suppressedAiTaskCards;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
+    crmState.razorpayPaymentsByOrder = nextState.razorpayPaymentsByOrder;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
     crmState.expertIdSequence = nextState.expertIdSequence;
     crmState.updatedAt = String(data.updatedAt || nextState.updatedAt);
@@ -728,11 +764,13 @@ async function persistCrmState(partialPayload = {}) {
     });
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.orderAttachmentsById = nextState.orderAttachmentsById;
+    crmState.suppressedAiTaskCards = nextState.suppressedAiTaskCards;
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
+    crmState.razorpayPaymentsByOrder = nextState.razorpayPaymentsByOrder;
     crmState.whatsappContactIdSequence = nextState.whatsappContactIdSequence;
     crmState.expertIdSequence = nextState.expertIdSequence;
     crmState.updatedAt = nextState.updatedAt;
@@ -2387,11 +2425,13 @@ app.get('/api/whatsapp/debug', (_req, res) => {
             loaded: crmStateLoaded,
             updatedAt: crmState.updatedAt,
             orderAttachments: Object.keys(crmState.orderAttachmentsById || {}).length,
+            suppressedAiTaskCards: (crmState.suppressedAiTaskCards || []).length,
             manualContacts: crmState.manualContacts.length,
             experts: crmState.experts.length,
             hasOrderListHtml: Boolean(crmState.orderListHtml),
             contactIdMapSize: Object.keys(crmState.whatsappContactIdMap || {}).length,
             readStateSize: Object.keys(crmState.whatsappReadState || {}).length,
+            razorpayPayments: Object.keys(crmState.razorpayPaymentsByOrder || {}).length,
             contactIdSequence: crmState.whatsappContactIdSequence,
             expertIdSequence: crmState.expertIdSequence
         },
@@ -2463,11 +2503,13 @@ app.get('/api/crm/state', async (_req, res) => {
     const statePayload = {
         orderListHtml: crmState.orderListHtml,
         orderAttachmentsById: crmState.orderAttachmentsById,
+        suppressedAiTaskCards: crmState.suppressedAiTaskCards,
         manualContacts: crmState.manualContacts,
         experts: crmState.experts,
         agentRoster: crmState.agentRoster,
         whatsappContactIdMap: crmState.whatsappContactIdMap,
         whatsappReadState: crmState.whatsappReadState,
+        razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
         whatsappContactIdSequence: crmState.whatsappContactIdSequence,
         expertIdSequence: crmState.expertIdSequence,
         updatedAt: crmState.updatedAt
@@ -2566,6 +2608,169 @@ app.delete('/api/whatsapp/contact/:waId', async (req, res) => {
     }
 });
 
+function isRazorpayConfigured() {
+    return Boolean(razorpayKeyId && razorpayKeySecret);
+}
+
+function toRazorpayMinorUnits(amount) {
+    const numeric = Number(String(amount || '').replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.round(numeric * 100);
+}
+
+function fromRazorpayMinorUnits(amount) {
+    const numeric = Number(amount || 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '';
+    return String(Math.round(numeric) / 100);
+}
+
+function verifyRazorpayWebhookSignature(req) {
+    if (!razorpayWebhookSecret) return true;
+    const received = String(req.get('x-razorpay-signature') || '').trim();
+    if (!received || !req.rawBody) return false;
+    const expected = crypto
+        .createHmac('sha256', razorpayWebhookSecret)
+        .update(req.rawBody)
+        .digest('hex');
+    const a = Buffer.from(received, 'hex');
+    const b = Buffer.from(expected, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+async function recordRazorpayPaymentState(update) {
+    const orderId = String(update?.orderId || '').trim();
+    if (!orderId) return false;
+    const existing = crmState.razorpayPaymentsByOrder?.[orderId] || {};
+    const nextMap = {
+        ...(crmState.razorpayPaymentsByOrder || {}),
+        [orderId]: {
+            ...existing,
+            ...update,
+            orderId,
+            updatedAt: new Date().toISOString()
+        }
+    };
+    await persistCrmState({
+        ...crmState,
+        razorpayPaymentsByOrder: nextMap
+    });
+    return true;
+}
+
+app.post('/api/razorpay/payment-link', async (req, res) => {
+    if (!isRazorpayConfigured()) {
+        return res.status(503).json({ ok: false, error: 'Razorpay credentials are not configured' });
+    }
+    const orderId = String(req.body?.orderId || '').trim();
+    const clientId = String(req.body?.clientId || '').trim();
+    const currency = String(req.body?.currency || 'INR').trim().toUpperCase() || 'INR';
+    const amount = String(req.body?.amount || '').trim();
+    const amountMinor = toRazorpayMinorUnits(amount);
+    if (!orderId || !amountMinor) {
+        return res.status(400).json({ ok: false, error: 'orderId and valid amount are required' });
+    }
+    const expiresAtSeconds = Math.floor((Date.now() + (7 * 24 * 60 * 60 * 1000)) / 1000);
+    const payload = {
+        amount: amountMinor,
+        currency,
+        accept_partial: true,
+        first_min_partial_amount: Math.max(100, Math.min(amountMinor, Math.ceil(amountMinor / 2))),
+        expire_by: expiresAtSeconds,
+        reference_id: orderId,
+        description: `UniSolveX order #${orderId}`,
+        customer: {
+            name: clientId ? `Client ${clientId}` : 'UniSolveX Client'
+        },
+        notify: {
+            sms: false,
+            email: false
+        },
+        notes: {
+            orderId,
+            clientId
+        },
+        callback_url: frontendAppBaseUrl,
+        callback_method: 'get'
+    };
+    try {
+        const auth = Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64');
+        const response = await fetch('https://api.razorpay.com/v1/payment_links', {
+            method: 'POST',
+            headers: {
+                Authorization: `Basic ${auth}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            return res.status(response.status).json({ ok: false, error: data?.error?.description || data?.error?.reason || 'Razorpay payment link creation failed' });
+        }
+        await recordRazorpayPaymentState({
+            orderId,
+            clientId,
+            paymentLinkId: String(data.id || ''),
+            shortUrl: String(data.short_url || ''),
+            currency,
+            amount,
+            amountPaid: fromRazorpayMinorUnits(data.amount_paid || 0),
+            receivedStatus: 'not_received',
+            status: String(data.status || 'created'),
+            event: 'payment_link.created'
+        });
+        return res.json({
+            ok: true,
+            paymentLink: {
+                id: String(data.id || ''),
+                shortUrl: String(data.short_url || ''),
+                status: String(data.status || 'created'),
+                amount,
+                currency,
+                expiresAt: new Date(expiresAtSeconds * 1000).toISOString()
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Razorpay payment link creation failed' });
+    }
+});
+
+app.post('/api/razorpay/webhook', async (req, res) => {
+    if (!verifyRazorpayWebhookSignature(req)) {
+        return res.status(400).json({ ok: false, error: 'Invalid Razorpay webhook signature' });
+    }
+    const event = String(req.body?.event || '').trim();
+    const paymentLink = req.body?.payload?.payment_link?.entity || null;
+    const payment = req.body?.payload?.payment?.entity || null;
+    const notes = paymentLink?.notes || payment?.notes || {};
+    const orderId = String(notes.orderId || paymentLink?.reference_id || '').trim();
+    if (!orderId) {
+        return res.json({ ok: true, ignored: true, reason: 'order id missing' });
+    }
+    const amount = fromRazorpayMinorUnits(paymentLink?.amount || payment?.amount || 0);
+    const amountPaid = fromRazorpayMinorUnits(paymentLink?.amount_paid || payment?.amount || 0);
+    const currency = String(paymentLink?.currency || payment?.currency || 'INR').trim().toUpperCase() || 'INR';
+    const linkStatus = String(paymentLink?.status || payment?.status || '').trim().toLowerCase();
+    const receivedStatus = event === 'payment_link.partially_paid' || linkStatus === 'partially_paid'
+        ? 'partial'
+        : (event === 'payment_link.paid' || linkStatus === 'paid' || String(payment?.status || '').toLowerCase() === 'captured')
+            ? 'complete'
+            : 'not_received';
+    await recordRazorpayPaymentState({
+        orderId,
+        clientId: String(notes.clientId || '').trim(),
+        paymentLinkId: String(paymentLink?.id || ''),
+        paymentId: String(payment?.id || ''),
+        shortUrl: String(paymentLink?.short_url || ''),
+        currency,
+        amount,
+        amountPaid,
+        receivedStatus,
+        status: linkStatus || String(payment?.status || ''),
+        event
+    });
+    return res.json({ ok: true });
+});
+
 app.post('/api/crm/state', async (req, res) => {
     try {
         const persisted = await persistCrmState(req.body || {});
@@ -2575,11 +2780,13 @@ app.post('/api/crm/state', async (req, res) => {
         const statePayload = {
             orderListHtml: crmState.orderListHtml,
             orderAttachmentsById: crmState.orderAttachmentsById,
+            suppressedAiTaskCards: crmState.suppressedAiTaskCards,
             manualContacts: crmState.manualContacts,
             experts: crmState.experts,
             agentRoster: crmState.agentRoster,
             whatsappContactIdMap: crmState.whatsappContactIdMap,
             whatsappReadState: crmState.whatsappReadState,
+            razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
             whatsappContactIdSequence: crmState.whatsappContactIdSequence,
             expertIdSequence: crmState.expertIdSequence,
             updatedAt: crmState.updatedAt

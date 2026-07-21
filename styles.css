@@ -219,7 +219,15 @@ nav div,
 }
 
 .brand-lockup {
+  display: inline-flex !important;
+  align-items: center !important;
   min-width: 0;
+  gap: 0.44rem !important;
+  padding: 0.36rem 0.72rem 0.34rem 0.48rem;
+  border-radius: 0.18rem;
+  background: linear-gradient(180deg, #070707 0%, #111111 100%);
+  border: 1px solid rgba(215, 184, 104, 0.2);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.18);
 }
 
 .admin-quick-menu-btn {
@@ -268,51 +276,104 @@ nav div,
 
 .brand-mark {
   position: relative;
-  width: 3.3rem;
-  height: 3.3rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 1.05rem;
-  background: linear-gradient(145deg, #5b6cff 0%, #4338ca 55%, #25157a 100%);
-  color: #ffffff !important;
-  box-shadow: 0 16px 28px rgba(67, 56, 202, 0.22);
-  overflow: hidden;
+  width: 1.82rem;
+  height: 1.82rem;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  filter: drop-shadow(0 7px 12px rgba(0, 0, 0, 0.32));
 }
 
-.brand-mark::after {
+.brand-shield {
+  position: absolute;
+  inset: 0.08rem;
+  background: linear-gradient(135deg, #ffffff 0 42%, #d7b868 43% 100%);
+  clip-path: polygon(50% 0, 90% 15%, 86% 72%, 50% 100%, 14% 72%, 10% 15%);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+}
+
+.brand-shield::before {
   content: "";
   position: absolute;
-  inset: 1px;
-  border-radius: calc(1rem - 1px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  inset: 0.24rem;
+  background: #111827;
+  clip-path: polygon(50% 0, 84% 17%, 80% 69%, 50% 91%, 20% 69%, 16% 17%);
 }
 
-.brand-mark-icon {
+.brand-monogram {
   position: relative;
   z-index: 1;
-  width: 2.7rem;
-  height: 2.7rem;
-  object-fit: cover;
-  border-radius: 0.72rem;
-  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.18));
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.08rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  transform: translateY(-0.02rem);
 }
 
 .brand-wordmark {
-  color: #1e293b !important;
-  letter-spacing: -0.03em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 0.9;
+  color: #f8fafc !important;
+  width: fit-content;
+}
+
+.brand-wordmark-main {
+  display: inline-block;
+  font-size: 1.22rem;
+  font-weight: 800;
+  color: #f8fafc !important;
+  text-shadow: none;
+}
+
+.brand-wordmark-main::first-letter {
+  font-size: inherit;
+}
+
+.brand-wordmark-x {
+  color: #c9a94f;
 }
 
 .brand-wordmark-accent {
-  color: #4f46e5 !important;
+  display: block;
+  width: 100%;
+  margin-top: 0.24rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #d1d5db !important;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.34rem;
+  font-weight: 800;
+  letter-spacing: 0.58em;
+  line-height: 1;
+  text-align: justify;
+  text-align-last: justify;
 }
 
 html[data-theme="dark"] .brand-wordmark {
   color: #dbe5ee !important;
 }
 
+html[data-theme="dark"] .brand-wordmark-main {
+  color: #f8fafc !important;
+}
+
+html[data-theme="dark"] .brand-wordmark-x {
+  color: #e1c56c;
+}
+
 html[data-theme="dark"] .brand-wordmark-accent {
-  color: #7c88ff !important;
+  color: #d1d5db !important;
 }
 
 #whatsappLastEvent,
@@ -1488,6 +1549,126 @@ html[data-theme="dark"] .chat-empty-state {
 .order-card .open-expert-notify-btn.is-notified {
   background: rgba(34, 197, 94, 0.16) !important;
   color: #15803d !important;
+}
+
+.payment-link-panel {
+  border: 1px solid rgba(99, 102, 241, 0.16);
+  border-radius: 0.5rem;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(238, 242, 255, 0.72));
+  padding: 0.78rem;
+}
+
+.payment-link-panel-head,
+.payment-link-meta,
+.payment-link-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.payment-link-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.payment-link-amount {
+  margin: 0.16rem 0 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.payment-link-badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.payment-link-badge.is-active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.payment-link-badge.is-expired {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.payment-link-badge.is-partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.payment-link-badge.is-paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.payment-link-meta {
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.payment-link-controls {
+  margin-top: 0.7rem;
+}
+
+.payment-link-primary,
+.payment-link-secondary,
+.payment-link-select {
+  width: 100%;
+  border-radius: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.payment-link-primary,
+.payment-link-secondary {
+  padding: 0.55rem 0.62rem;
+}
+
+.payment-link-primary {
+  background: #4f46e5;
+  color: white;
+}
+
+.payment-link-secondary {
+  border: 1px solid rgba(79, 70, 229, 0.22);
+  background: white;
+  color: #4338ca;
+}
+
+.payment-link-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.payment-link-select {
+  margin-top: 0.62rem;
+  border: 1px solid rgba(148, 163, 184, 0.46);
+  background: white;
+  padding: 0.52rem 0.6rem;
+  color: #1f2937;
+}
+
+.payment-link-url {
+  margin: 0.52rem 0 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: #64748b;
 }
 
 .order-due-soon-chip {
