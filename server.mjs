@@ -40,6 +40,12 @@ const firebaseAuthAgentEmails = new Set(
         .map((value) => String(value || '').trim().toLowerCase())
         .filter(Boolean)
 );
+const firebaseAuthTestAgentEmails = new Set(
+    String(process.env.FIREBASE_TEST_AGENT_EMAILS || '')
+        .split(',')
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+);
 const whatsappMediaStoragePrefix = process.env.WHATSAPP_MEDIA_STORAGE_PREFIX || 'whatsapp-media';
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
