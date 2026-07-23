@@ -126,6 +126,7 @@ lucide.createIcons();
         const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
         const odExpertPaymentStatusInput = document.getElementById('odExpertPaymentStatus');
         const generatePaymentLinkBtn = document.getElementById('generatePaymentLinkBtn');
+        const createRazorpayLinkBtn = document.getElementById('createRazorpayLinkBtn');
         const paymentLinkModal = document.getElementById('paymentLinkModal');
         const closePaymentLinkModalBtn = document.getElementById('closePaymentLinkModalBtn');
         const openRazorpayLinkBtn = document.getElementById('openRazorpayLinkBtn');
@@ -135,6 +136,21 @@ lucide.createIcons();
         const odPaymentLinkReceivedText = document.getElementById('odPaymentLinkReceivedText');
         const odPaymentLinkValidityText = document.getElementById('odPaymentLinkValidityText');
         const odPaymentLinkUrlText = document.getElementById('odPaymentLinkUrlText');
+        const odPaymentLinkHistoryList = document.getElementById('odPaymentLinkHistoryList');
+        const openUpiQrBtn = document.getElementById('openUpiQrBtn');
+        const upiQrModal = document.getElementById('upiQrModal');
+        const closeUpiQrModalBtn = document.getElementById('closeUpiQrModalBtn');
+        const upiQrMeta = document.getElementById('upiQrMeta');
+        const upiIdInput = document.getElementById('upiIdInput');
+        const saveUpiIdBtn = document.getElementById('saveUpiIdBtn');
+        const upiQrBox = document.getElementById('upiQrBox');
+        const upiQrAmount = document.getElementById('upiQrAmount');
+        const upiQrIdText = document.getElementById('upiQrIdText');
+        const upiQrStatusText = document.getElementById('upiQrStatusText');
+        const copyUpiIdBtn = document.getElementById('copyUpiIdBtn');
+        const copyUpiLinkBtn = document.getElementById('copyUpiLinkBtn');
+        const openUpiIntentBtn = document.getElementById('openUpiIntentBtn');
+        const upiQrHint = document.getElementById('upiQrHint');
         const openAttachmentPageBtn = document.getElementById('openAttachmentPageBtn');
         const openManageExpertPageBtn = document.getElementById('openManageExpertPageBtn');
         const openRecordTransactionBtn = document.getElementById('openRecordTransactionBtn');
@@ -187,7 +203,9 @@ lucide.createIcons();
         let activeWhatsappWaId = '';
         const orderSequenceByClient = {};
         const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
+        const CRM_STATE_SNAPSHOT_CACHE_KEY = 'unisolvex_crm_state_snapshot_v1';
         const ORDER_DETAILS_DRAFTS_STORAGE_KEY = 'unisolvex_order_details_drafts_v1';
+        const UPI_ID_STORAGE_KEY = 'unisolvex_payment_upi_id_v1';
         const MANUAL_CONTACTS_STORAGE_KEY = 'unisolvex_manual_contacts_v1';
         const EXPERTS_STORAGE_KEY = 'unisolvex_experts_v1';
         const WHATSAPP_CONTACT_ID_MAP_KEY = 'unisolvex_whatsapp_contact_id_map_v1';
@@ -572,6 +590,31 @@ lucide.createIcons();
             lucide.createIcons();
         }
 
+        function readCachedCrmStateSnapshot() {
+            try {
+                const raw = localStorage.getItem(CRM_STATE_SNAPSHOT_CACHE_KEY);
+                const parsed = raw ? JSON.parse(raw) : null;
+                return parsed && typeof parsed === 'object' ? parsed : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function writeCachedCrmStateSnapshot(state) {
+            if (!state || typeof state !== 'object') return;
+            try {
+                localStorage.setItem(CRM_STATE_SNAPSHOT_CACHE_KEY, JSON.stringify(state));
+            } catch {
+                // Cache is only for faster first paint; storage quota failures are non-fatal.
+            }
+        }
+
+        function hydrateCrmStateFromCache() {
+            const cached = readCachedCrmStateSnapshot();
+            if (!cached) return false;
+            return applyCrmStateSnapshot(cached, { includeOrders: true, fromCache: true });
+        }
+
         function persistOrderListToStorage(skipRemote) {
             cloudCrmState.orderListHtml = orderList.innerHTML;
             if (!skipRemote) {
@@ -772,6 +815,7 @@ lucide.createIcons();
 
         function applyCrmStateSnapshot(state, options = {}) {
             const includeOrders = options.includeOrders !== false;
+            const fromCache = options.fromCache === true;
             if (!state || typeof state !== 'object') return false;
             const hasRemoteState =
                 typeof state.orderListHtml === 'string' ||
@@ -822,6 +866,9 @@ lucide.createIcons();
             }
             scheduleContactOrderRefresh();
             lastCrmStateUpdatedAt = String(state.updatedAt || lastCrmStateUpdatedAt || '');
+            if (!fromCache) {
+                writeCachedCrmStateSnapshot(getCurrentCrmStatePayload());
+            }
             clearCrmBackendErrorState();
             return true;
         }
@@ -2820,6 +2867,94 @@ lucide.createIcons();
             };
         }
 
+        function getSavedUpiId() {
+            return String(localStorage.getItem(UPI_ID_STORAGE_KEY) || '').trim();
+        }
+
+        function setSavedUpiId(value) {
+            const clean = String(value || '').replace(/\s+/g, '').trim();
+            localStorage.setItem(UPI_ID_STORAGE_KEY, clean);
+            return clean;
+        }
+
+        function getUpiPaymentContext() {
+            const identity = getOrderRecordIdentity(activeOrderCard);
+            const { currency, amount } = getPaymentLinkAmountFromForm();
+            const upiId = String(upiIdInput?.value || getSavedUpiId()).trim();
+            const amountValue = parseAmountToNumber(amount);
+            const note = `UniSolveX Order ${identity.orderId || ''}`.trim();
+            const params = new URLSearchParams({
+                pa: upiId,
+                pn: 'UniSolveX',
+                am: amountValue ? String(amountValue) : '',
+                cu: 'INR',
+                tn: note
+            });
+            return {
+                orderId: identity.orderId,
+                clientId: identity.clientId,
+                currency,
+                amount,
+                amountValue,
+                upiId,
+                uri: `upi://pay?${params.toString()}`
+            };
+        }
+
+        function renderUpiQrModal() {
+            const context = getUpiPaymentContext();
+            const isInr = context.currency === 'INR';
+            const hasUpi = Boolean(context.upiId);
+            const hasAmount = context.amountValue > 0;
+            if (upiIdInput) upiIdInput.value = context.upiId;
+            if (upiQrMeta) upiQrMeta.textContent = `Order #${context.orderId || '-'} | Client ${context.clientId || '-'} | INR UPI payment`;
+            if (upiQrAmount) upiQrAmount.textContent = isInr && hasAmount ? formatPaymentAmount('INR', context.amount) : 'Set INR base amount';
+            if (upiQrIdText) upiQrIdText.textContent = hasUpi ? context.upiId : 'Not set';
+            if (upiQrStatusText) {
+                upiQrStatusText.textContent = !isInr
+                    ? 'Only INR supported'
+                    : !hasAmount
+                        ? 'Amount required'
+                        : !hasUpi
+                            ? 'UPI ID required'
+                            : 'Ready for scan';
+            }
+            if (upiQrHint) {
+                upiQrHint.textContent = !isInr
+                    ? 'UPI QR is available only when base currency is INR.'
+                    : 'Client can scan this QR from PhonePe, Google Pay, Paytm, or any UPI app.';
+            }
+            const canRender = isInr && hasUpi && hasAmount;
+            if (upiQrBox) {
+                upiQrBox.innerHTML = canRender
+                    ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(context.uri)}" alt="UPI payment QR code">`
+                    : `<span>${!isInr ? 'INR only' : !hasUpi ? 'Enter UPI ID' : 'Enter amount'}</span>`;
+            }
+            [copyUpiIdBtn, copyUpiLinkBtn, openUpiIntentBtn].forEach((btn) => {
+                if (btn) btn.disabled = !canRender;
+            });
+        }
+
+        function openUpiQrModal() {
+            renderUpiQrModal();
+            upiQrModal?.classList.remove('hidden');
+        }
+
+        function closeUpiQrModal() {
+            upiQrModal?.classList.add('hidden');
+        }
+
+        async function copyTextToClipboard(text, successMessage) {
+            const value = String(text || '').trim();
+            if (!value) return;
+            try {
+                await navigator.clipboard.writeText(value);
+                if (successMessage) alert(successMessage);
+            } catch {
+                window.prompt('Copy this value:', value);
+            }
+        }
+
         function getPaymentLinkState(card = activeOrderCard) {
             if (!card) {
                 return { id: '', url: '', amount: '', amountPaid: '', currency: 'INR', status: 'not_generated', receivedStatus: 'not_received', expiresAt: '', createdAt: '' };
@@ -2835,6 +2970,77 @@ lucide.createIcons();
                 expiresAt: String(card.dataset.paymentLinkExpiresAt || '').trim(),
                 createdAt: String(card.dataset.paymentLinkCreatedAt || '').trim()
             };
+        }
+
+        function parsePaymentLinkHistory(card = activeOrderCard) {
+            if (!card) return [];
+            try {
+                const parsed = JSON.parse(card.dataset.paymentLinkHistory || '[]');
+                return Array.isArray(parsed)
+                    ? parsed
+                        .filter((row) => row && typeof row === 'object')
+                        .map((row) => ({
+                            id: String(row.id || row.paymentLinkId || '').trim(),
+                            url: String(row.url || row.shortUrl || '').trim(),
+                            amount: String(row.amount || '').trim(),
+                            amountPaid: String(row.amountPaid || '').trim(),
+                            currency: String(row.currency || 'INR').trim().toUpperCase() || 'INR',
+                            status: String(row.status || '').trim() || 'created',
+                            receivedStatus: String(row.receivedStatus || 'not_received').trim() || 'not_received',
+                            expiresAt: String(row.expiresAt || '').trim(),
+                            createdAt: String(row.createdAt || '').trim(),
+                            updatedAt: String(row.updatedAt || '').trim(),
+                            event: String(row.event || '').trim()
+                        }))
+                    : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function writePaymentLinkHistory(card, history) {
+            if (!card) return;
+            card.dataset.paymentLinkHistory = JSON.stringify(Array.isArray(history) ? history : []);
+        }
+
+        function upsertPaymentLinkHistory(card, entry) {
+            if (!card || !entry || typeof entry !== 'object') return [];
+            const cleanEntry = {
+                id: String(entry.id || entry.paymentLinkId || '').trim(),
+                url: String(entry.url || entry.shortUrl || '').trim(),
+                amount: String(entry.amount || '').trim(),
+                amountPaid: String(entry.amountPaid || '').trim(),
+                currency: String(entry.currency || 'INR').trim().toUpperCase() || 'INR',
+                status: String(entry.status || 'created').trim() || 'created',
+                receivedStatus: String(entry.receivedStatus || 'not_received').trim() || 'not_received',
+                expiresAt: String(entry.expiresAt || '').trim(),
+                createdAt: String(entry.createdAt || new Date().toISOString()).trim(),
+                updatedAt: String(entry.updatedAt || '').trim(),
+                event: String(entry.event || '').trim()
+            };
+            const history = parsePaymentLinkHistory(card);
+            const matchIndex = history.findIndex((row) => cleanEntry.id && row.id === cleanEntry.id);
+            if (matchIndex >= 0) {
+                history[matchIndex] = { ...history[matchIndex], ...cleanEntry };
+            } else {
+                history.unshift(cleanEntry);
+            }
+            history.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
+            writePaymentLinkHistory(card, history);
+            return history;
+        }
+
+        function syncLatestPaymentLinkToCard(card, entry) {
+            if (!card || !entry) return;
+            card.dataset.paymentLinkId = String(entry.id || entry.paymentLinkId || '');
+            card.dataset.paymentLinkUrl = String(entry.url || entry.shortUrl || '');
+            card.dataset.paymentLinkAmount = String(entry.amount || '');
+            card.dataset.paymentLinkAmountPaid = String(entry.amountPaid || '');
+            card.dataset.paymentLinkCurrency = String(entry.currency || 'INR').toUpperCase();
+            card.dataset.paymentLinkStatus = String(entry.status || 'created');
+            card.dataset.paymentLinkReceivedStatus = String(entry.receivedStatus || 'not_received');
+            card.dataset.paymentLinkCreatedAt = String(entry.createdAt || card.dataset.paymentLinkCreatedAt || new Date().toISOString());
+            card.dataset.paymentLinkExpiresAt = String(entry.expiresAt || '');
         }
 
         function getOrderCardById(orderId) {
@@ -2891,13 +3097,24 @@ lucide.createIcons();
                 const orderId = String(row?.orderId || '').trim();
                 const card = getOrderCardById(orderId);
                 if (!card) return;
-                if (row.paymentLinkId) card.dataset.paymentLinkId = String(row.paymentLinkId || '');
-                if (row.shortUrl) card.dataset.paymentLinkUrl = String(row.shortUrl || '');
-                if (row.amount) card.dataset.paymentLinkAmount = String(row.amount || '');
-                if (row.amountPaid) card.dataset.paymentLinkAmountPaid = String(row.amountPaid || '');
-                if (row.currency) card.dataset.paymentLinkCurrency = String(row.currency || 'INR').toUpperCase();
-                if (row.status) card.dataset.paymentLinkStatus = String(row.status || '');
-                if (row.receivedStatus) card.dataset.paymentLinkReceivedStatus = String(row.receivedStatus || 'not_received');
+                const links = Array.isArray(row.links) && row.links.length
+                    ? row.links
+                    : [{
+                        id: row.paymentLinkId,
+                        url: row.shortUrl,
+                        amount: row.amount,
+                        amountPaid: row.amountPaid,
+                        currency: row.currency,
+                        status: row.status,
+                        receivedStatus: row.receivedStatus,
+                        expiresAt: row.expiresAt,
+                        createdAt: row.createdAt || row.updatedAt,
+                        updatedAt: row.updatedAt,
+                        event: row.event
+                    }];
+                links.forEach((link) => upsertPaymentLinkHistory(card, link));
+                const latest = parsePaymentLinkHistory(card)[0];
+                if (latest) syncLatestPaymentLinkToCard(card, latest);
                 if (row.updatedAt) card.dataset.paymentLinkUpdatedAt = String(row.updatedAt || '');
                 if (row.receivedStatus === 'partial' || row.receivedStatus === 'complete') {
                     syncPaymentReceivedToOrder(card, row.receivedStatus);
@@ -2948,6 +3165,32 @@ lucide.createIcons();
             if (odPaymentLinkReceivedStatus) odPaymentLinkReceivedStatus.value = state.receivedStatus || 'not_received';
             if (openRazorpayLinkBtn) openRazorpayLinkBtn.disabled = !state.url;
             if (odPaymentLinkUrlText) odPaymentLinkUrlText.textContent = state.url || 'No link yet.';
+            if (odPaymentLinkHistoryList) {
+                const history = parsePaymentLinkHistory(card);
+                if (!history.length) {
+                    odPaymentLinkHistoryList.innerHTML = '<p class="payment-link-history-empty">No Razorpay link generated yet.</p>';
+                } else {
+                    odPaymentLinkHistoryList.innerHTML = history.map((row, index) => {
+                        const status = row.receivedStatus === 'complete'
+                            ? 'Paid'
+                            : row.receivedStatus === 'partial'
+                                ? 'Partial'
+                                : (row.status || 'Created');
+                        const dateText = formatDateTimeForCard(row.createdAt || row.updatedAt) || '-';
+                        const linkText = row.url ? 'Open' : 'No link';
+                        const safeUrl = escapeHtml(row.url || '');
+                        return `
+                            <div class="payment-link-history-row">
+                                <div>
+                                    <strong>${index === 0 ? 'Latest: ' : ''}${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
+                                    <span>${escapeHtml(dateText)} | ${escapeHtml(status)}</span>
+                                </div>
+                                ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}">${escapeHtml(linkText)}</button>` : '<span class="payment-link-history-muted">No link</span>'}
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
         }
 
         function openPaymentLinkModal() {
@@ -2957,6 +3200,64 @@ lucide.createIcons();
 
         function closePaymentLinkModal() {
             paymentLinkModal?.classList.add('hidden');
+        }
+
+        async function createRazorpayPaymentLinkForActiveOrder() {
+            if (!activeOrderCard) return;
+            const { currency, amount } = getPaymentLinkAmountFromForm();
+            if (!parseAmountToNumber(amount)) {
+                alert('Base amount fill karo, phir payment link generate hoga.');
+                return;
+            }
+            const identity = getOrderRecordIdentity(activeOrderCard);
+            if (!identity.orderId) {
+                alert('Order ID not found.');
+                return;
+            }
+            const originalText = createRazorpayLinkBtn?.textContent || '';
+            if (createRazorpayLinkBtn) {
+                createRazorpayLinkBtn.disabled = true;
+                createRazorpayLinkBtn.textContent = 'Generating...';
+            }
+            try {
+                const response = await whatsappFetch('/api/razorpay/payment-link', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        orderId: identity.orderId,
+                        clientId: identity.clientId,
+                        currency,
+                        amount
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data?.paymentLink?.shortUrl) {
+                    throw new Error(data?.error || 'Razorpay payment link create nahi ho paya.');
+                }
+                const link = data.paymentLink;
+                const entry = {
+                    id: link.id || '',
+                    url: link.shortUrl || '',
+                    amount: link.amount || amount,
+                    amountPaid: '',
+                    currency: link.currency || currency,
+                    status: link.status || 'created',
+                    receivedStatus: 'not_received',
+                    createdAt: link.createdAt || new Date().toISOString(),
+                    expiresAt: link.expiresAt || ''
+                };
+                upsertPaymentLinkHistory(activeOrderCard, entry);
+                syncLatestPaymentLinkToCard(activeOrderCard, entry);
+                renderPaymentLinkPanel(activeOrderCard);
+                persistOrderListToStorage();
+            } catch (error) {
+                alert((error?.message || 'Razorpay payment link create nahi ho paya.') + '\n\nRazorpay setup ke liye Key ID, Key Secret, Webhook Secret, aur live backend URL chahiye.');
+            } finally {
+                if (createRazorpayLinkBtn) {
+                    createRazorpayLinkBtn.disabled = false;
+                    createRazorpayLinkBtn.textContent = originalText || 'Generate New Razorpay Link';
+                }
+            }
         }
 
         function syncOrderPaymentIndicator(card) {
@@ -5143,6 +5444,7 @@ lucide.createIcons();
         updateAiAssistButtonState(null);
         updateChatAssignmentState('');
         restoreManualContactsFromStorage();
+        hydrateCrmStateFromCache();
         scheduleContactOrderRefresh();
         initWhatsappSync();
         void hydrateCrmStateFromBackend().then((loaded) => {
@@ -5908,68 +6210,34 @@ lucide.createIcons();
         openRecordTransactionBtn?.addEventListener('click', function() {
             openTransactionRecordsModal();
         });
-        generatePaymentLinkBtn?.addEventListener('click', async function() {
+        generatePaymentLinkBtn?.addEventListener('click', function() {
             if (!activeOrderCard) return;
-            const { currency, amount } = getPaymentLinkAmountFromForm();
-            if (!parseAmountToNumber(amount)) {
-                alert('Base amount fill karo, phir payment link generate hoga.');
-                return;
-            }
-            const identity = getOrderRecordIdentity(activeOrderCard);
-            if (!identity.orderId) {
-                alert('Order ID not found.');
-                return;
-            }
-            if (activeOrderCard.dataset.paymentLinkUrl) {
-                openPaymentLinkModal();
-                return;
-            }
-            const originalText = generatePaymentLinkBtn.textContent;
-            generatePaymentLinkBtn.disabled = true;
-            generatePaymentLinkBtn.textContent = 'Generating...';
-            try {
-                const response = await whatsappFetch('/api/razorpay/payment-link', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        orderId: identity.orderId,
-                        clientId: identity.clientId,
-                        currency,
-                        amount
-                    })
-                });
-                const data = await response.json().catch(() => ({}));
-                if (!response.ok || !data?.paymentLink?.shortUrl) {
-                    throw new Error(data?.error || 'Razorpay payment link create nahi ho paya.');
-                }
-                const link = data.paymentLink;
-                activeOrderCard.dataset.paymentLinkId = link.id || '';
-                activeOrderCard.dataset.paymentLinkUrl = link.shortUrl || '';
-                activeOrderCard.dataset.paymentLinkAmount = link.amount || amount;
-                activeOrderCard.dataset.paymentLinkAmountPaid = '';
-                activeOrderCard.dataset.paymentLinkCurrency = link.currency || currency;
-                activeOrderCard.dataset.paymentLinkStatus = link.status || 'created';
-                activeOrderCard.dataset.paymentLinkReceivedStatus = 'not_received';
-                activeOrderCard.dataset.paymentLinkCreatedAt = new Date().toISOString();
-                activeOrderCard.dataset.paymentLinkExpiresAt = link.expiresAt || '';
-                renderPaymentLinkPanel(activeOrderCard);
-                persistOrderListToStorage();
-                openPaymentLinkModal();
-            } catch (error) {
-                alert((error?.message || 'Razorpay payment link create nahi ho paya.') + '\n\nRazorpay setup ke liye Key ID, Key Secret, Webhook Secret, aur live backend URL chahiye.');
-            } finally {
-                generatePaymentLinkBtn.disabled = false;
-                generatePaymentLinkBtn.textContent = originalText;
-            }
+            openPaymentLinkModal();
         });
+        createRazorpayLinkBtn?.addEventListener('click', createRazorpayPaymentLinkForActiveOrder);
         openRazorpayLinkBtn?.addEventListener('click', function() {
             const url = getPaymentLinkState(activeOrderCard).url;
+            if (!url) return;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        });
+        odPaymentLinkHistoryList?.addEventListener('click', function(event) {
+            const btn = event.target.closest('.payment-link-history-open');
+            if (!btn) return;
+            const url = String(btn.dataset.paymentLinkUrl || '').trim();
             if (!url) return;
             window.open(url, '_blank', 'noopener,noreferrer');
         });
         odPaymentLinkReceivedStatus?.addEventListener('change', function() {
             if (!activeOrderCard) return;
             activeOrderCard.dataset.paymentLinkReceivedStatus = String(this.value || 'not_received');
+            const latest = getPaymentLinkState(activeOrderCard);
+            if (latest.id || latest.url) {
+                upsertPaymentLinkHistory(activeOrderCard, {
+                    ...latest,
+                    receivedStatus: activeOrderCard.dataset.paymentLinkReceivedStatus,
+                    updatedAt: new Date().toISOString()
+                });
+            }
             syncPaymentReceivedToOrder(activeOrderCard, activeOrderCard.dataset.paymentLinkReceivedStatus);
             renderPaymentLinkPanel(activeOrderCard);
             persistOrderListToStorage();
@@ -5979,12 +6247,41 @@ lucide.createIcons();
             if (event.target !== paymentLinkModal) return;
             closePaymentLinkModal();
         });
+        openUpiQrBtn?.addEventListener('click', openUpiQrModal);
+        closeUpiQrModalBtn?.addEventListener('click', closeUpiQrModal);
+        upiQrModal?.addEventListener('click', function(event) {
+            if (event.target !== upiQrModal) return;
+            closeUpiQrModal();
+        });
+        saveUpiIdBtn?.addEventListener('click', function() {
+            const upiId = setSavedUpiId(upiIdInput?.value || '');
+            if (!upiId) {
+                alert('UPI ID enter karo, example: name@upi');
+                renderUpiQrModal();
+                return;
+            }
+            renderUpiQrModal();
+        });
+        upiIdInput?.addEventListener('input', renderUpiQrModal);
+        copyUpiIdBtn?.addEventListener('click', function() {
+            copyTextToClipboard(getUpiPaymentContext().upiId, 'UPI ID copied.');
+        });
+        copyUpiLinkBtn?.addEventListener('click', function() {
+            copyTextToClipboard(getUpiPaymentContext().uri, 'UPI payment link copied.');
+        });
+        openUpiIntentBtn?.addEventListener('click', function() {
+            const context = getUpiPaymentContext();
+            if (!context.upiId || !context.amountValue || context.currency !== 'INR') return;
+            window.open(context.uri, '_blank', 'noopener,noreferrer');
+        });
         ['odBaseCurrency', 'odBaseAmountValue'].forEach((id) => {
             document.getElementById(id)?.addEventListener('input', function() {
                 renderPaymentLinkPanel(activeOrderCard);
+                renderUpiQrModal();
             });
             document.getElementById(id)?.addEventListener('change', function() {
                 renderPaymentLinkPanel(activeOrderCard);
+                renderUpiQrModal();
             });
         });
         closeManageExpertsModalBtn?.addEventListener('click', closeManageExpertsModal);

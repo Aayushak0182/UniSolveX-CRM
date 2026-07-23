@@ -41,7 +41,7 @@ const firebaseAuthAgentEmails = new Set(
         .filter(Boolean)
 );
 const firebaseAuthTestAgentEmails = new Set(
-    String(process.env.FIREBASE_TEST_AGENT_EMAILS || '')
+    String(process.env.FIREBASE_AUTH_TEST_AGENT_EMAILS || '')
         .split(',')
         .map((value) => String(value || '').trim().toLowerCase())
         .filter(Boolean)
@@ -72,6 +72,7 @@ const aiAgentMaxRepliesPerLead = Math.max(1, Number(process.env.AI_AGENT_MAX_REP
 const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || '').trim();
 const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || '').trim();
 const razorpayWebhookSecret = String(process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
+const firebaseReadTimeoutMs = Math.max(800, Number(process.env.FIREBASE_READ_TIMEOUT_MS || 2500) || 2500);
 const aiAgentAlwaysActiveWaIds = new Set(
     String(process.env.AI_AGENT_ALWAYS_ACTIVE_WA_IDS || '')
         .split(',')
@@ -666,19 +667,57 @@ function normalizeCrmStatePayload(payload = {}) {
                 .map(([key, value]) => {
                     const orderId = String(key || '').trim();
                     if (!orderId || !value || typeof value !== 'object') return null;
+                    const links = Array.isArray(value.links)
+                        ? value.links
+                            .filter((link) => link && typeof link === 'object')
+                            .map((link) => ({
+                                id: String(link.id || link.paymentLinkId || '').trim(),
+                                url: String(link.url || link.shortUrl || '').trim(),
+                                currency: String(link.currency || value.currency || 'INR').trim().toUpperCase() || 'INR',
+                                amount: String(link.amount || '').trim(),
+                                amountPaid: String(link.amountPaid || '').trim(),
+                                receivedStatus: String(link.receivedStatus || 'not_received').trim(),
+                                status: String(link.status || '').trim(),
+                                expiresAt: String(link.expiresAt || '').trim(),
+                                createdAt: String(link.createdAt || '').trim(),
+                                updatedAt: String(link.updatedAt || '').trim(),
+                                event: String(link.event || '').trim()
+                            }))
+                            .filter((link) => link.id || link.url)
+                        : [];
+                    if (!links.length && (value.paymentLinkId || value.shortUrl)) {
+                        links.push({
+                            id: String(value.paymentLinkId || '').trim(),
+                            url: String(value.shortUrl || '').trim(),
+                            currency: String(value.currency || 'INR').trim().toUpperCase() || 'INR',
+                            amount: String(value.amount || '').trim(),
+                            amountPaid: String(value.amountPaid || '').trim(),
+                            receivedStatus: String(value.receivedStatus || 'not_received').trim(),
+                            status: String(value.status || '').trim(),
+                            expiresAt: String(value.expiresAt || '').trim(),
+                            createdAt: String(value.createdAt || value.updatedAt || '').trim(),
+                            updatedAt: String(value.updatedAt || '').trim(),
+                            event: String(value.event || '').trim()
+                        });
+                    }
+                    links.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
+                    const latest = links[0] || {};
                     return [orderId, {
                         orderId,
                         clientId: String(value.clientId || '').trim(),
-                        paymentLinkId: String(value.paymentLinkId || '').trim(),
+                        paymentLinkId: String(value.paymentLinkId || latest.id || '').trim(),
                         paymentId: String(value.paymentId || '').trim(),
-                        shortUrl: String(value.shortUrl || '').trim(),
-                        currency: String(value.currency || 'INR').trim().toUpperCase() || 'INR',
-                        amount: String(value.amount || '').trim(),
-                        amountPaid: String(value.amountPaid || '').trim(),
-                        receivedStatus: String(value.receivedStatus || 'not_received').trim(),
-                        status: String(value.status || '').trim(),
+                        shortUrl: String(value.shortUrl || latest.url || '').trim(),
+                        currency: String(value.currency || latest.currency || 'INR').trim().toUpperCase() || 'INR',
+                        amount: String(value.amount || latest.amount || '').trim(),
+                        amountPaid: String(value.amountPaid || latest.amountPaid || '').trim(),
+                        receivedStatus: String(value.receivedStatus || latest.receivedStatus || 'not_received').trim(),
+                        status: String(value.status || latest.status || '').trim(),
+                        expiresAt: String(value.expiresAt || latest.expiresAt || '').trim(),
+                        createdAt: String(value.createdAt || latest.createdAt || '').trim(),
                         event: String(value.event || '').trim(),
-                        updatedAt: String(value.updatedAt || '').trim()
+                        updatedAt: String(value.updatedAt || '').trim(),
+                        links
                     }];
                 })
                 .filter(Boolean)
@@ -756,10 +795,22 @@ async function ensureCrmStateLoaded(forceRefresh = false) {
     if (crmStateLoadInFlight) return crmStateLoadInFlight;
     if (!forceRefresh && crmStateLoaded) return true;
     if (!initFirebasePersistence()) return false;
-    crmStateLoadInFlight = loadPersistedCrmState()
+    const loadPromise = loadPersistedCrmState();
+    crmStateLoadInFlight = Promise.race([
+        loadPromise,
+        new Promise((resolve) => {
+            setTimeout(() => {
+                console.warn(`[storage] CRM state load timed out after ${firebaseReadTimeoutMs}ms; using current in-memory state.`);
+                resolve(false);
+            }, firebaseReadTimeoutMs);
+        })
+    ])
         .finally(() => {
             crmStateLoadInFlight = null;
         });
+    loadPromise.catch((error) => {
+        lastFirebaseWriteError = error?.message || 'Failed to load CRM state';
+    });
     return crmStateLoadInFlight;
 }
 
@@ -2647,13 +2698,38 @@ async function recordRazorpayPaymentState(update) {
     const orderId = String(update?.orderId || '').trim();
     if (!orderId) return false;
     const existing = crmState.razorpayPaymentsByOrder?.[orderId] || {};
+    const now = new Date().toISOString();
+    const linkEntry = {
+        id: String(update.paymentLinkId || '').trim(),
+        url: String(update.shortUrl || '').trim(),
+        currency: String(update.currency || existing.currency || 'INR').trim().toUpperCase() || 'INR',
+        amount: String(update.amount || '').trim(),
+        amountPaid: String(update.amountPaid || '').trim(),
+        receivedStatus: String(update.receivedStatus || 'not_received').trim(),
+        status: String(update.status || '').trim(),
+        expiresAt: String(update.expiresAt || '').trim(),
+        createdAt: String(update.createdAt || now).trim(),
+        updatedAt: now,
+        event: String(update.event || '').trim()
+    };
+    const links = Array.isArray(existing.links)
+        ? existing.links.filter((link) => link && typeof link === 'object')
+        : [];
+    const matchIndex = links.findIndex((link) => linkEntry.id && String(link.id || link.paymentLinkId || '') === linkEntry.id);
+    if (matchIndex >= 0) {
+        links[matchIndex] = { ...links[matchIndex], ...linkEntry };
+    } else if (linkEntry.id || linkEntry.url) {
+        links.unshift(linkEntry);
+    }
+    links.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
     const nextMap = {
         ...(crmState.razorpayPaymentsByOrder || {}),
         [orderId]: {
             ...existing,
             ...update,
             orderId,
-            updatedAt: new Date().toISOString()
+            links,
+            updatedAt: now
         }
     };
     await persistCrmState({
@@ -2661,6 +2737,19 @@ async function recordRazorpayPaymentState(update) {
         razorpayPaymentsByOrder: nextMap
     });
     return true;
+}
+
+function findOrderIdByRazorpayLinkId(paymentLinkId) {
+    const target = String(paymentLinkId || '').trim();
+    if (!target) return '';
+    for (const [orderId, row] of Object.entries(crmState.razorpayPaymentsByOrder || {})) {
+        if (String(row?.paymentLinkId || '').trim() === target) return orderId;
+        const links = Array.isArray(row?.links) ? row.links : [];
+        if (links.some((link) => String(link?.id || link?.paymentLinkId || '').trim() === target)) {
+            return orderId;
+        }
+    }
+    return '';
 }
 
 app.post('/api/razorpay/payment-link', async (req, res) => {
@@ -2722,6 +2811,8 @@ app.post('/api/razorpay/payment-link', async (req, res) => {
             amountPaid: fromRazorpayMinorUnits(data.amount_paid || 0),
             receivedStatus: 'not_received',
             status: String(data.status || 'created'),
+            expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
+            createdAt: new Date().toISOString(),
             event: 'payment_link.created'
         });
         return res.json({
@@ -2732,6 +2823,7 @@ app.post('/api/razorpay/payment-link', async (req, res) => {
                 status: String(data.status || 'created'),
                 amount,
                 currency,
+                createdAt: new Date().toISOString(),
                 expiresAt: new Date(expiresAtSeconds * 1000).toISOString()
             }
         });
@@ -2748,7 +2840,8 @@ app.post('/api/razorpay/webhook', async (req, res) => {
     const paymentLink = req.body?.payload?.payment_link?.entity || null;
     const payment = req.body?.payload?.payment?.entity || null;
     const notes = paymentLink?.notes || payment?.notes || {};
-    const orderId = String(notes.orderId || paymentLink?.reference_id || '').trim();
+    const paymentLinkId = String(paymentLink?.id || payment?.payment_link_id || payment?.link_id || '').trim();
+    const orderId = String(notes.orderId || paymentLink?.reference_id || findOrderIdByRazorpayLinkId(paymentLinkId) || '').trim();
     if (!orderId) {
         return res.json({ ok: true, ignored: true, reason: 'order id missing' });
     }
@@ -2764,7 +2857,7 @@ app.post('/api/razorpay/webhook', async (req, res) => {
     await recordRazorpayPaymentState({
         orderId,
         clientId: String(notes.clientId || '').trim(),
-        paymentLinkId: String(paymentLink?.id || ''),
+        paymentLinkId,
         paymentId: String(payment?.id || ''),
         shortUrl: String(paymentLink?.short_url || ''),
         currency,
@@ -3438,27 +3531,32 @@ app.use((error, _req, res, next) => {
     return next(error);
 });
 
-try {
-    if (initFirebasePersistence()) {
-        await ensurePersistedStateLoaded(true);
-        await ensureCrmStateLoaded(true);
-        console.log('[storage] Firebase persistence enabled.');
-        if (isCloudinaryConfigured()) {
-            console.log('[storage] Media backup provider: Cloudinary');
-        } else if (firebaseBucket) {
-            console.log('[storage] Media backup bucket:', firebaseBucket.name);
-        }
-    } else if (firebasePersistenceInitError) {
-        console.warn('[storage] Firebase persistence disabled:', firebasePersistenceInitError);
-    } else {
-        console.warn('[storage] Firebase persistence not configured; using in-memory storage only.');
-    }
-} catch (error) {
-    console.warn('[storage] Failed to load persisted chat state:', error?.message || error);
-}
-
 const server = app.listen(port, () => {
     console.log(`WhatsApp webhook server running on http://localhost:${port}`);
+    setTimeout(async () => {
+        try {
+            if (initFirebasePersistence()) {
+                void ensurePersistedStateLoaded(true).catch((error) => {
+                    console.warn('[storage] Failed to warm chat state:', error?.message || error);
+                });
+                void ensureCrmStateLoaded(true).catch((error) => {
+                    console.warn('[storage] Failed to warm CRM state:', error?.message || error);
+                });
+                console.log('[storage] Firebase persistence enabled; warming state in background.');
+                if (isCloudinaryConfigured()) {
+                    console.log('[storage] Media backup provider: Cloudinary');
+                } else if (firebaseBucket) {
+                    console.log('[storage] Media backup bucket:', firebaseBucket.name);
+                }
+            } else if (firebasePersistenceInitError) {
+                console.warn('[storage] Firebase persistence disabled:', firebasePersistenceInitError);
+            } else {
+                console.warn('[storage] Firebase persistence not configured; using in-memory storage only.');
+            }
+        } catch (error) {
+            console.warn('[storage] Failed to start persisted state warmup:', error?.message || error);
+        }
+    }, 0);
 });
 
 const wss = new WebSocketServer({ server, path: '/ws' });
