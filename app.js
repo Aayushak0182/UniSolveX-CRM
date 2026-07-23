@@ -224,6 +224,29 @@ lucide.createIcons();
         const APP_THEME_STORAGE_KEY = 'unisolvex_theme_v1';
         const configuredWhatsappApiBase = localStorage.getItem(WHATSAPP_API_BASE_STORAGE_KEY);
         const initialViewMode = new URLSearchParams(window.location.search).get('view');
+        function cleanRazorpayCallbackUrl() {
+            if (!window.history || !window.history.replaceState) return;
+            const url = new URL(window.location.href);
+            const razorpayParams = [
+                'razorpay_payment_id',
+                'razorpay_payment_link_id',
+                'razorpay_payment_link_reference_id',
+                'razorpay_payment_link_status',
+                'razorpay_signature',
+                'payment_id',
+                'payment_link_id',
+                'payment_link_reference_id',
+                'payment_link_status',
+                'reference_id'
+            ];
+            const hasRazorpayCallback = razorpayParams.some((key) => url.searchParams.has(key));
+            if (!hasRazorpayCallback) return;
+            razorpayParams.forEach((key) => url.searchParams.delete(key));
+            const nextSearch = url.searchParams.toString();
+            const cleanUrl = `${url.origin}${url.pathname}${nextSearch ? `?${nextSearch}` : ''}${url.hash || ''}`;
+            window.history.replaceState(window.history.state, document.title, cleanUrl);
+        }
+        cleanRazorpayCallbackUrl();
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
