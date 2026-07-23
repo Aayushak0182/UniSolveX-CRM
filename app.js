@@ -3128,6 +3128,10 @@ lucide.createIcons();
         function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
             const query = new URLSearchParams({
                 amount: String(amount || ''),
+
+        function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
+            const query = new URLSearchParams({
+                amount: String(amount || ''),
                 currency: String(currency || 'INR').toUpperCase(),
                 order_id: String(orderId || ''),
                 client_id: String(clientId || '')
@@ -3152,6 +3156,22 @@ lucide.createIcons();
             }
             syncOrderPaymentIndicator(card);
             updateOrderDetailsSummary(card);
+
+            // Sync current active order modal inputs in real time
+            if (card === activeOrderCard) {
+                const manualStatusSelect = document.getElementById('odPaymentStatusOverride');
+                if (manualStatusSelect) {
+                    manualStatusSelect.value = card.dataset.paymentStatusOverride || 'auto';
+                }
+                const clientPaidAmountInput = document.getElementById('odClientPaidAmount');
+                if (clientPaidAmountInput) {
+                    clientPaidAmountInput.value = card.dataset.clientPaidAmount || '';
+                }
+                const clientPaidCurrencySelect = document.getElementById('odClientPaidCurrency');
+                if (clientPaidCurrencySelect) {
+                    clientPaidCurrencySelect.value = card.dataset.clientPaidCurrency || 'INR';
+                }
+            }
         }
 
         function applyRazorpayPaymentUpdates(map) {
@@ -3179,6 +3199,10 @@ lucide.createIcons();
                 const latest = parsePaymentLinkHistory(card)[0];
                 if (latest) syncLatestPaymentLinkToCard(card, latest);
                 if (row.updatedAt) card.dataset.paymentLinkUpdatedAt = String(row.updatedAt || '');
+                
+                // Always sync the order payment indicator
+                syncOrderPaymentIndicator(card);
+
                 if (row.receivedStatus === 'partial' || row.receivedStatus === 'complete') {
                     syncPaymentReceivedToOrder(card, row.receivedStatus);
                 } else {
@@ -3198,7 +3222,7 @@ lucide.createIcons();
                 const response = await whatsappFetch('/api/razorpay/payment-link/refresh', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderId: identity.orderId })
+                    body: JSON.stringify({ orderId: identity.orderId, force: true })
                 });
                 if (!response.ok) return false;
                 const data = await response.json().catch(() => ({}));
@@ -3385,6 +3409,7 @@ lucide.createIcons();
                 };
                 upsertPaymentLinkHistory(activeOrderCard, entry);
                 syncLatestPaymentLinkToCard(activeOrderCard, entry);
+                syncOrderPaymentIndicator(activeOrderCard);
                 renderPaymentLinkPanel(activeOrderCard);
                 setPaymentManagementTab('history');
                 persistOrderListToStorage();
@@ -3419,44 +3444,74 @@ lucide.createIcons();
             const linkState = getPaymentLinkState(card);
             const linkDisplayStatus = getPaymentLinkDisplayStatus(linkState);
 
+            // 1. Manual/explicit overrides check
             if (manualStatus === 'complete') {
                 indicatorEl.className = 'order-payment-indicator is-paid';
-                indicatorEl.innerHTML = '<span>&#10003;</span> Payment Paid';
+                indicatorEl.innerHTML = '&#10003;';
+                indicatorEl.title = 'Payment Paid';
+                indicatorEl.classList.remove('hidden');
                 return;
             }
 
             if (manualStatus === 'partial') {
                 indicatorEl.className = 'order-payment-indicator is-partial';
-                indicatorEl.innerHTML = '<span>...</span> Partially Paid';
+                indicatorEl.innerHTML = '...';
+                indicatorEl.title = 'Partially Paid';
+                indicatorEl.classList.remove('hidden');
                 return;
             }
 
+            // 2. Paid amount vs total amount check (works for manual updates and Razorpay webhook updates)
+            if (hasPaymentInfo && paidAmount >= totalAmount) {
+                indicatorEl.className = 'order-payment-indicator is-paid';
+                indicatorEl.innerHTML = '&#10003;';
+                indicatorEl.title = 'Payment Paid';
+                indicatorEl.classList.remove('hidden');
+                return;
+            }
+
+            if (hasPaymentInfo && paidAmount > 0 && paidAmount < totalAmount) {
+                indicatorEl.className = 'order-payment-indicator is-partial';
+                indicatorEl.innerHTML = '...';
+                indicatorEl.title = 'Partially Paid';
+                indicatorEl.classList.remove('hidden');
+                return;
+            }
+
+            // 3. Payment link pending check (only if not fully/partially paid based on amounts)
             if (linkState.url && (linkDisplayStatus === 'active' || linkDisplayStatus === 'not_generated')) {
                 indicatorEl.className = 'order-payment-indicator is-pending';
-                indicatorEl.innerHTML = '<span>!</span> Payment Pending';
+                indicatorEl.innerHTML = '...';
+                indicatorEl.title = 'Payment Pending';
+                indicatorEl.classList.remove('hidden');
                 return;
             }
 
-            if (!hasPaymentInfo) {
-                indicatorEl.className = 'order-payment-indicator hidden ml-1';
-                indicatorEl.textContent = '';
-                return;
-            }
-
-            if (paidAmount >= totalAmount) {
-                indicatorEl.className = 'order-payment-indicator is-paid';
-                indicatorEl.innerHTML = '<span>&#10003;</span> Payment Paid';
-                return;
-            }
-
-            indicatorEl.className = 'order-payment-indicator is-partial';
-            indicatorEl.innerHTML = '<span>...</span> Partially Paid';
+            // 4. Default case: no payment info
+            indicatorEl.className = 'order-payment-indicator hidden ml-1';
+            indicatorEl.textContent = '';
         }
 
         function syncOrderExpertPaymentIndicator(card) {
             const payoutEl = card.querySelector('.order-expert-pay');
             if (!payoutEl) return;
 
+            const line = payoutEl.closest('p');
+            if (!line) return;
+
+            let indicatorEl = line.querySelector('.order-expert-payment-indicator');
+            if (!indicatorEl) {
+                indicatorEl = document.createElement('span');
+                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
+                line.appendChild(indicatorEl);
+            }
+
+            const payoutAmount = parseAmountToNumber(payoutEl.textContent || '');
+            const manualStatus = String(card.dataset.expertPaymentStatus || 'pending').toLowerCase();
+
+            if (!payoutAmount) {
+                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
+                indicatorEl.textContent = '';
             const line = payoutEl.closest('p');
             if (!line) return;
 

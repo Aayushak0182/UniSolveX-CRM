@@ -2586,7 +2586,8 @@ app.post('/api/razorpay/payment-link/refresh', async (req, res) => {
     try {
         await ensureCrmStateLoaded(false);
         const orderId = String(req.body?.orderId || '').trim();
-        await refreshRazorpayPaymentStatuses(orderId);
+        const force = req.body?.force === true;
+        await refreshRazorpayPaymentStatuses(orderId, force);
         return res.json({
             ok: true,
             razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
@@ -2759,7 +2760,7 @@ async function recordRazorpayPaymentState(update) {
     return true;
 }
 
-function shouldRefreshRazorpayLink(link) {
+function shouldRefreshRazorpayLink(link, force = false) {
     if (!link || typeof link !== 'object') return false;
     const id = String(link.id || link.paymentLinkId || '').trim();
     if (!id) return false;
@@ -2767,14 +2768,15 @@ function shouldRefreshRazorpayLink(link) {
     const status = String(link.status || '').trim().toLowerCase();
     if (receivedStatus === 'complete' || status === 'paid') return false;
     if (status === 'expired' || status === 'cancelled') return false;
+    if (force) return true;
     const expiresAt = new Date(link.expiresAt || 0).getTime();
     if (expiresAt && Date.now() > expiresAt + (2 * 60 * 60 * 1000)) return false;
     const lastRefreshAt = Number(razorpayLinkStatusRefreshAt.get(id) || 0);
     return Date.now() - lastRefreshAt > 30000;
 }
 
-async function refreshRazorpayPaymentLinkStatus(orderId, link) {
-    if (!isRazorpayConfigured() || !shouldRefreshRazorpayLink(link)) return false;
+async function refreshRazorpayPaymentLinkStatus(orderId, link, force = false) {
+    if (!isRazorpayConfigured() || !shouldRefreshRazorpayLink(link, force)) return false;
     const paymentLinkId = String(link.id || link.paymentLinkId || '').trim();
     razorpayLinkStatusRefreshAt.set(paymentLinkId, Date.now());
     try {
@@ -2818,7 +2820,7 @@ async function refreshRazorpayPaymentLinkStatus(orderId, link) {
     }
 }
 
-async function refreshRazorpayPaymentStatuses(targetOrderId = '') {
+async function refreshRazorpayPaymentStatuses(targetOrderId = '', force = false) {
     if (!isRazorpayConfigured()) return false;
     const entries = Object.entries(crmState.razorpayPaymentsByOrder || {})
         .filter(([orderId]) => !targetOrderId || String(orderId) === String(targetOrderId));
@@ -2838,7 +2840,7 @@ async function refreshRazorpayPaymentStatuses(targetOrderId = '') {
                 methods: row?.methods
             }];
         for (const link of links.slice(0, 5)) {
-            changed = (await refreshRazorpayPaymentLinkStatus(orderId, link)) || changed;
+            changed = (await refreshRazorpayPaymentLinkStatus(orderId, link, force)) || changed;
         }
     }
     return changed;
