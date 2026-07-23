@@ -99,6 +99,7 @@ const messageStatusById = new Map();
 const sockets = new Set();
 const webhookEvents = [];
 const apiEvents = [];
+const razorpayLinkStatusRefreshAt = new Map();
 const aiStateByWaId = new Map();
 const aiReplyQueueByWaId = new Map();
 const crmState = {
@@ -681,7 +682,8 @@ function normalizeCrmStatePayload(payload = {}) {
                                 expiresAt: String(link.expiresAt || '').trim(),
                                 createdAt: String(link.createdAt || '').trim(),
                                 updatedAt: String(link.updatedAt || '').trim(),
-                                event: String(link.event || '').trim()
+                                event: String(link.event || '').trim(),
+                                methods: Array.isArray(link.methods) ? link.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
                             }))
                             .filter((link) => link.id || link.url)
                         : [];
@@ -697,7 +699,8 @@ function normalizeCrmStatePayload(payload = {}) {
                             expiresAt: String(value.expiresAt || '').trim(),
                             createdAt: String(value.createdAt || value.updatedAt || '').trim(),
                             updatedAt: String(value.updatedAt || '').trim(),
-                            event: String(value.event || '').trim()
+                            event: String(value.event || '').trim(),
+                            methods: Array.isArray(value.methods) ? value.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
                         });
                     }
                     links.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0).getTime() - new Date(a.createdAt || a.updatedAt || 0).getTime());
@@ -2554,6 +2557,7 @@ app.get('/api/whatsapp/contacts', async (_req, res) => {
 app.get('/api/crm/state', async (_req, res) => {
     try {
         await ensureCrmStateLoaded(false);
+        await refreshRazorpayPaymentStatuses();
     } catch (error) {
         console.warn('[storage] Failed to load CRM state:', error?.message || error);
     }
@@ -2576,6 +2580,21 @@ app.get('/api/crm/state', async (_req, res) => {
         state: statePayload,
         ...statePayload
     });
+});
+
+app.post('/api/razorpay/payment-link/refresh', async (req, res) => {
+    try {
+        await ensureCrmStateLoaded(false);
+        const orderId = String(req.body?.orderId || '').trim();
+        await refreshRazorpayPaymentStatuses(orderId);
+        return res.json({
+            ok: true,
+            razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
+            payment: orderId ? crmState.razorpayPaymentsByOrder?.[orderId] || null : null
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Razorpay status refresh failed' });
+    }
 });
 
 app.get('/api/ai-agent/debug', (_req, res) => {
@@ -2738,6 +2757,91 @@ async function recordRazorpayPaymentState(update) {
         razorpayPaymentsByOrder: nextMap
     });
     return true;
+}
+
+function shouldRefreshRazorpayLink(link) {
+    if (!link || typeof link !== 'object') return false;
+    const id = String(link.id || link.paymentLinkId || '').trim();
+    if (!id) return false;
+    const receivedStatus = String(link.receivedStatus || 'not_received').trim().toLowerCase();
+    const status = String(link.status || '').trim().toLowerCase();
+    if (receivedStatus === 'complete' || status === 'paid') return false;
+    if (status === 'expired' || status === 'cancelled') return false;
+    const expiresAt = new Date(link.expiresAt || 0).getTime();
+    if (expiresAt && Date.now() > expiresAt + (2 * 60 * 60 * 1000)) return false;
+    const lastRefreshAt = Number(razorpayLinkStatusRefreshAt.get(id) || 0);
+    return Date.now() - lastRefreshAt > 30000;
+}
+
+async function refreshRazorpayPaymentLinkStatus(orderId, link) {
+    if (!isRazorpayConfigured() || !shouldRefreshRazorpayLink(link)) return false;
+    const paymentLinkId = String(link.id || link.paymentLinkId || '').trim();
+    razorpayLinkStatusRefreshAt.set(paymentLinkId, Date.now());
+    try {
+        const auth = Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64');
+        const response = await fetch(`https://api.razorpay.com/v1/payment_links/${encodeURIComponent(paymentLinkId)}`, {
+            headers: {
+                Authorization: `Basic ${auth}`
+            }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            console.warn('[razorpay] status refresh failed', paymentLinkId, data?.error?.description || response.status);
+            return false;
+        }
+        const linkStatus = String(data.status || link.status || '').trim().toLowerCase();
+        const amountPaid = fromRazorpayMinorUnits(data.amount_paid || 0);
+        const receivedStatus = linkStatus === 'paid'
+            ? 'complete'
+            : (linkStatus === 'partially_paid' || Number(amountPaid) > 0)
+                ? 'partial'
+                : 'not_received';
+        await recordRazorpayPaymentState({
+            orderId,
+            clientId: String(data.notes?.clientId || '').trim(),
+            paymentLinkId,
+            shortUrl: String(data.short_url || link.url || link.shortUrl || '').trim(),
+            currency: String(data.currency || link.currency || 'INR').trim().toUpperCase() || 'INR',
+            amount: fromRazorpayMinorUnits(data.amount || 0) || String(link.amount || ''),
+            amountPaid,
+            receivedStatus,
+            status: linkStatus || String(link.status || ''),
+            expiresAt: data.expire_by ? new Date(Number(data.expire_by) * 1000).toISOString() : String(link.expiresAt || ''),
+            createdAt: link.createdAt || (data.created_at ? new Date(Number(data.created_at) * 1000).toISOString() : ''),
+            event: 'payment_link.status_refreshed',
+            methods: Array.isArray(link.methods) ? link.methods : []
+        });
+        return true;
+    } catch (error) {
+        console.warn('[razorpay] status refresh error', paymentLinkId, error?.message || error);
+        return false;
+    }
+}
+
+async function refreshRazorpayPaymentStatuses(targetOrderId = '') {
+    if (!isRazorpayConfigured()) return false;
+    const entries = Object.entries(crmState.razorpayPaymentsByOrder || {})
+        .filter(([orderId]) => !targetOrderId || String(orderId) === String(targetOrderId));
+    let changed = false;
+    for (const [orderId, row] of entries) {
+        const links = Array.isArray(row?.links) && row.links.length
+            ? row.links
+            : [{
+                id: row?.paymentLinkId,
+                url: row?.shortUrl,
+                amount: row?.amount,
+                currency: row?.currency,
+                status: row?.status,
+                receivedStatus: row?.receivedStatus,
+                expiresAt: row?.expiresAt,
+                createdAt: row?.createdAt,
+                methods: row?.methods
+            }];
+        for (const link of links.slice(0, 5)) {
+            changed = (await refreshRazorpayPaymentLinkStatus(orderId, link)) || changed;
+        }
+    }
+    return changed;
 }
 
 function findOrderIdByRazorpayLinkId(paymentLinkId) {

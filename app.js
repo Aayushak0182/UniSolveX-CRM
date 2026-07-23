@@ -290,6 +290,7 @@ lucide.createIcons();
         let crmStateHydrationComplete = false;
         let crmStatePendingSave = false;
         let crmStatePollingTimer = null;
+        let paymentStatusRefreshTimer = null;
         let lastCrmStateUpdatedAt = '';
         const cloudCrmState = {
             orderListHtml: '',
@@ -3078,6 +3079,9 @@ lucide.createIcons();
             paymentLinkModal?.querySelectorAll('[data-payment-view]').forEach((view) => {
                 view.classList.toggle('is-active', view.dataset.paymentView === target);
             });
+            if (target === 'history') {
+                refreshPaymentStatusForActiveOrder();
+            }
         }
 
         function getSelectedPaymentMethods() {
@@ -3161,6 +3165,49 @@ lucide.createIcons();
             if (activeOrderCard) {
                 renderPaymentLinkPanel(activeOrderCard);
             }
+        }
+
+        async function refreshPaymentStatusForActiveOrder() {
+            if (!activeOrderCard || !activeOrderCard.dataset.paymentLinkId) return false;
+            const identity = getOrderRecordIdentity(activeOrderCard);
+            if (!identity.orderId) return false;
+            try {
+                const response = await whatsappFetch('/api/razorpay/payment-link/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderId: identity.orderId })
+                });
+                if (!response.ok) return false;
+                const data = await response.json().catch(() => ({}));
+                if (data?.razorpayPaymentsByOrder && typeof data.razorpayPaymentsByOrder === 'object') {
+                    cloudCrmState.razorpayPaymentsByOrder = data.razorpayPaymentsByOrder;
+                    applyRazorpayPaymentUpdates(data.razorpayPaymentsByOrder);
+                    persistOrderListToStorage();
+                    return true;
+                }
+            } catch (error) {
+                console.warn('Razorpay payment status refresh failed:', error);
+            }
+            return false;
+        }
+
+        function startPaymentStatusRefreshTimer() {
+            if (paymentStatusRefreshTimer) clearInterval(paymentStatusRefreshTimer);
+            refreshPaymentStatusForActiveOrder();
+            paymentStatusRefreshTimer = setInterval(() => {
+                if (!paymentLinkModal || paymentLinkModal.classList.contains('hidden')) {
+                    clearInterval(paymentStatusRefreshTimer);
+                    paymentStatusRefreshTimer = null;
+                    return;
+                }
+                refreshPaymentStatusForActiveOrder();
+            }, 15000);
+        }
+
+        function stopPaymentStatusRefreshTimer() {
+            if (!paymentStatusRefreshTimer) return;
+            clearInterval(paymentStatusRefreshTimer);
+            paymentStatusRefreshTimer = null;
         }
 
         function renderPaymentLinkPanel(card = activeOrderCard) {
@@ -3254,9 +3301,11 @@ lucide.createIcons();
             renderPaymentLinkPanel(activeOrderCard);
             setPaymentManagementTab('razorpay');
             paymentLinkModal?.classList.remove('hidden');
+            startPaymentStatusRefreshTimer();
         }
 
         function closePaymentLinkModal() {
+            stopPaymentStatusRefreshTimer();
             paymentLinkModal?.classList.add('hidden');
         }
 
@@ -3344,16 +3393,24 @@ lucide.createIcons();
             const paidAmount = parseAmountToNumber(card.dataset.clientPaidAmount || '');
             const manualStatus = (card.dataset.paymentStatusOverride || 'auto').toLowerCase();
             const hasPaymentInfo = paidAmount > 0 && totalAmount > 0;
+            const linkState = getPaymentLinkState(card);
+            const linkDisplayStatus = getPaymentLinkDisplayStatus(linkState);
 
             if (manualStatus === 'complete') {
-                indicatorEl.className = 'order-payment-indicator ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-600 text-white text-[10px] font-bold';
-                indicatorEl.innerHTML = '&#10003;';
+                indicatorEl.className = 'order-payment-indicator is-paid';
+                indicatorEl.innerHTML = '<span>&#10003;</span> Payment Paid';
                 return;
             }
 
             if (manualStatus === 'partial') {
-                indicatorEl.className = 'order-payment-indicator ml-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-700';
-                indicatorEl.innerHTML = '<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-black text-white text-[9px] leading-none">...</span><span>Partially Paid</span>';
+                indicatorEl.className = 'order-payment-indicator is-partial';
+                indicatorEl.innerHTML = '<span>...</span> Partially Paid';
+                return;
+            }
+
+            if (linkState.url && (linkDisplayStatus === 'active' || linkDisplayStatus === 'not_generated')) {
+                indicatorEl.className = 'order-payment-indicator is-pending';
+                indicatorEl.innerHTML = '<span>!</span> Payment Pending';
                 return;
             }
 
@@ -3364,13 +3421,13 @@ lucide.createIcons();
             }
 
             if (paidAmount >= totalAmount) {
-                indicatorEl.className = 'order-payment-indicator ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-600 text-white text-[10px] font-bold';
-                indicatorEl.innerHTML = '&#10003;';
+                indicatorEl.className = 'order-payment-indicator is-paid';
+                indicatorEl.innerHTML = '<span>&#10003;</span> Payment Paid';
                 return;
             }
 
-            indicatorEl.className = 'order-payment-indicator ml-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-700';
-            indicatorEl.innerHTML = '<span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-black text-white text-[9px] leading-none">...</span><span>Partially Paid</span>';
+            indicatorEl.className = 'order-payment-indicator is-partial';
+            indicatorEl.innerHTML = '<span>...</span> Partially Paid';
         }
 
         function syncOrderExpertPaymentIndicator(card) {
