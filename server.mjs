@@ -2710,7 +2710,8 @@ async function recordRazorpayPaymentState(update) {
         expiresAt: String(update.expiresAt || '').trim(),
         createdAt: String(update.createdAt || now).trim(),
         updatedAt: now,
-        event: String(update.event || '').trim()
+        event: String(update.event || '').trim(),
+        methods: Array.isArray(update.methods) ? update.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
     };
     const links = Array.isArray(existing.links)
         ? existing.links.filter((link) => link && typeof link === 'object')
@@ -2752,6 +2753,12 @@ function findOrderIdByRazorpayLinkId(paymentLinkId) {
     return '';
 }
 
+function getOrderIdFromRazorpayReference(referenceId) {
+    const value = String(referenceId || '').trim();
+    if (!value) return '';
+    return value.replace(/-\d+-\d+$/, '').trim();
+}
+
 app.post('/api/razorpay/payment-link', async (req, res) => {
     if (!isRazorpayConfigured()) {
         return res.status(503).json({ ok: false, error: 'Razorpay credentials are not configured' });
@@ -2764,29 +2771,51 @@ app.post('/api/razorpay/payment-link', async (req, res) => {
     if (!orderId || !amountMinor) {
         return res.status(400).json({ ok: false, error: 'orderId and valid amount are required' });
     }
-    const expiresAtSeconds = Math.floor((Date.now() + (7 * 24 * 60 * 60 * 1000)) / 1000);
+    const expireHours = Math.max(1, Math.min(168, Number(req.body?.expireHours || 24) || 24));
+    const requestedMethods = Array.isArray(req.body?.methods)
+        ? req.body.methods.map((method) => String(method || '').trim()).filter(Boolean)
+        : [];
+    const allowedMethods = new Set(['upi', 'netbanking', 'card', 'wallet', 'bank_transfer']);
+    const methods = requestedMethods.filter((method) => allowedMethods.has(method));
+    const selectedMethods = methods.length ? methods : ['upi', 'netbanking', 'card', 'wallet', 'bank_transfer'];
+    const methodOptions = selectedMethods.reduce((acc, method) => {
+        acc[method] = true;
+        return acc;
+    }, {});
+    const acceptPartial = Boolean(req.body?.acceptPartial);
+    const sendEmail = Boolean(req.body?.sendEmail);
+    const referenceId = `${orderId}-${amountMinor}-${Date.now()}`;
+    const expiresAtSeconds = Math.floor((Date.now() + (expireHours * 60 * 60 * 1000)) / 1000);
     const payload = {
         amount: amountMinor,
         currency,
-        accept_partial: true,
-        first_min_partial_amount: Math.max(100, Math.min(amountMinor, Math.ceil(amountMinor / 2))),
+        accept_partial: acceptPartial,
         expire_by: expiresAtSeconds,
-        reference_id: orderId,
+        reference_id: referenceId,
         description: `UniSolveX order #${orderId}`,
         customer: {
             name: clientId ? `Client ${clientId}` : 'UniSolveX Client'
         },
         notify: {
             sms: false,
-            email: false
+            email: sendEmail
+        },
+        options: {
+            checkout: {
+                method: methodOptions
+            }
         },
         notes: {
             orderId,
-            clientId
+            clientId,
+            referenceId
         },
         callback_url: frontendAppBaseUrl,
         callback_method: 'get'
     };
+    if (acceptPartial) {
+        payload.first_min_partial_amount = Math.max(100, Math.min(amountMinor, Math.ceil(amountMinor / 2)));
+    }
     try {
         const auth = Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64');
         const response = await fetch('https://api.razorpay.com/v1/payment_links', {
@@ -2813,7 +2842,8 @@ app.post('/api/razorpay/payment-link', async (req, res) => {
             status: String(data.status || 'created'),
             expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
             createdAt: new Date().toISOString(),
-            event: 'payment_link.created'
+            event: 'payment_link.created',
+            methods: selectedMethods
         });
         return res.json({
             ok: true,
@@ -2824,7 +2854,9 @@ app.post('/api/razorpay/payment-link', async (req, res) => {
                 amount,
                 currency,
                 createdAt: new Date().toISOString(),
-                expiresAt: new Date(expiresAtSeconds * 1000).toISOString()
+                expiresAt: new Date(expiresAtSeconds * 1000).toISOString(),
+                referenceId,
+                methods: selectedMethods
             }
         });
     } catch (error) {
@@ -2841,7 +2873,7 @@ app.post('/api/razorpay/webhook', async (req, res) => {
     const payment = req.body?.payload?.payment?.entity || null;
     const notes = paymentLink?.notes || payment?.notes || {};
     const paymentLinkId = String(paymentLink?.id || payment?.payment_link_id || payment?.link_id || '').trim();
-    const orderId = String(notes.orderId || paymentLink?.reference_id || findOrderIdByRazorpayLinkId(paymentLinkId) || '').trim();
+    const orderId = String(notes.orderId || getOrderIdFromRazorpayReference(paymentLink?.reference_id) || findOrderIdByRazorpayLinkId(paymentLinkId) || '').trim();
     if (!orderId) {
         return res.json({ ok: true, ignored: true, reason: 'order id missing' });
     }

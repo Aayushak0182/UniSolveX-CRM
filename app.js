@@ -137,6 +137,12 @@ lucide.createIcons();
         const odPaymentLinkValidityText = document.getElementById('odPaymentLinkValidityText');
         const odPaymentLinkUrlText = document.getElementById('odPaymentLinkUrlText');
         const odPaymentLinkHistoryList = document.getElementById('odPaymentLinkHistoryList');
+        const paymentManagementOrderId = document.getElementById('paymentManagementOrderId');
+        const paymentSummaryOrderId = document.getElementById('paymentSummaryOrderId');
+        const paymentSummaryCustomer = document.getElementById('paymentSummaryCustomer');
+        const paymentLinkExpireHours = document.getElementById('paymentLinkExpireHours');
+        const paymentAcceptPartial = document.getElementById('paymentAcceptPartial');
+        const paymentSendEmail = document.getElementById('paymentSendEmail');
         const openUpiQrBtn = document.getElementById('openUpiQrBtn');
         const upiQrModal = document.getElementById('upiQrModal');
         const closeUpiQrModalBtn = document.getElementById('closeUpiQrModalBtn');
@@ -2990,7 +2996,8 @@ lucide.createIcons();
                             expiresAt: String(row.expiresAt || '').trim(),
                             createdAt: String(row.createdAt || '').trim(),
                             updatedAt: String(row.updatedAt || '').trim(),
-                            event: String(row.event || '').trim()
+                            event: String(row.event || '').trim(),
+                            methods: Array.isArray(row.methods) ? row.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
                         }))
                     : [];
             } catch {
@@ -3016,7 +3023,8 @@ lucide.createIcons();
                 expiresAt: String(entry.expiresAt || '').trim(),
                 createdAt: String(entry.createdAt || new Date().toISOString()).trim(),
                 updatedAt: String(entry.updatedAt || '').trim(),
-                event: String(entry.event || '').trim()
+                event: String(entry.event || '').trim(),
+                methods: Array.isArray(entry.methods) ? entry.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
             };
             const history = parsePaymentLinkHistory(card);
             const matchIndex = history.findIndex((row) => cleanEntry.id && row.id === cleanEntry.id);
@@ -3060,6 +3068,34 @@ lucide.createIcons();
             if (state.receivedStatus === 'complete') return 'paid_full';
             if (state.receivedStatus === 'partial') return 'paid_partial';
             return isPaymentLinkExpired(state) ? 'expired' : 'active';
+        }
+
+        function setPaymentManagementTab(tabName) {
+            const target = String(tabName || 'razorpay').trim() || 'razorpay';
+            paymentLinkModal?.querySelectorAll('[data-payment-tab]').forEach((button) => {
+                button.classList.toggle('is-active', button.dataset.paymentTab === target);
+            });
+            paymentLinkModal?.querySelectorAll('[data-payment-view]').forEach((view) => {
+                view.classList.toggle('is-active', view.dataset.paymentView === target);
+            });
+        }
+
+        function getSelectedPaymentMethods() {
+            const selected = Array.from(paymentLinkModal?.querySelectorAll('.payment-method-option:checked') || [])
+                .map((input) => String(input.value || '').trim())
+                .filter(Boolean);
+            return selected.length ? selected : ['upi', 'netbanking', 'card', 'wallet', 'bank_transfer'];
+        }
+
+        function getPaymentMethodLabel(method) {
+            const labels = {
+                upi: 'UPI',
+                netbanking: 'Net Banking',
+                card: 'Card',
+                wallet: 'Wallet',
+                bank_transfer: 'Bank Transfer'
+            };
+            return labels[String(method || '').trim()] || String(method || '').trim();
         }
 
         function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
@@ -3131,18 +3167,26 @@ lucide.createIcons();
             if (!odPaymentLinkAmount || !odPaymentLinkStatusBadge) return;
             const formAmount = getPaymentLinkAmountFromForm();
             const state = getPaymentLinkState(card);
+            const identity = getOrderRecordIdentity(card);
             const displayStatus = getPaymentLinkDisplayStatus(state);
             const amountText = state.url
                 ? formatPaymentAmount(state.currency, state.amount)
                 : formatPaymentAmount(formAmount.currency, formAmount.amount);
             const statusMap = {
-                not_generated: ['Not Generated', 'is-muted'],
-                active: ['Active', 'is-active'],
-                expired: ['Expired', 'is-expired'],
-                paid_partial: ['Received Partial', 'is-partial'],
-                paid_full: ['Received Full', 'is-paid']
+                not_generated: ['Payment Pending', 'is-muted'],
+                active: ['Payment Pending', 'is-active'],
+                expired: ['Link Expired', 'is-expired'],
+                paid_partial: ['Payment Partial', 'is-partial'],
+                paid_full: ['Payment Paid', 'is-paid']
             };
             const [label, tone] = statusMap[displayStatus] || statusMap.not_generated;
+            const customerName = String(card?.dataset.clientName || card?.querySelector('.client-name')?.textContent || '').trim();
+            const customerText = customerName || identity.clientId
+                ? `${customerName || 'Client'}${identity.clientId ? ` (${identity.clientId})` : ''}`
+                : '-';
+            if (paymentManagementOrderId) paymentManagementOrderId.textContent = identity.orderId || '-';
+            if (paymentSummaryOrderId) paymentSummaryOrderId.textContent = identity.orderId || '-';
+            if (paymentSummaryCustomer) paymentSummaryCustomer.textContent = customerText;
             odPaymentLinkAmount.textContent = amountText;
             odPaymentLinkStatusBadge.textContent = label;
             odPaymentLinkStatusBadge.className = `payment-link-badge ${tone}`;
@@ -3164,28 +3208,41 @@ lucide.createIcons();
             }
             if (odPaymentLinkReceivedStatus) odPaymentLinkReceivedStatus.value = state.receivedStatus || 'not_received';
             if (openRazorpayLinkBtn) openRazorpayLinkBtn.disabled = !state.url;
-            if (odPaymentLinkUrlText) odPaymentLinkUrlText.textContent = state.url || 'No link yet.';
+            if (odPaymentLinkUrlText) {
+                odPaymentLinkUrlText.textContent = state.url
+                    ? `Latest link: ${state.url}`
+                    : 'This order requires payment. Generate a payment link to send to the customer.';
+            }
             if (odPaymentLinkHistoryList) {
                 const history = parsePaymentLinkHistory(card);
                 if (!history.length) {
                     odPaymentLinkHistoryList.innerHTML = '<p class="payment-link-history-empty">No Razorpay link generated yet.</p>';
                 } else {
-                    odPaymentLinkHistoryList.innerHTML = history.map((row, index) => {
-                        const status = row.receivedStatus === 'complete'
-                            ? 'Paid'
+                    odPaymentLinkHistoryList.innerHTML = history.map((row) => {
+                        const paymentStatus = row.receivedStatus === 'complete'
+                            ? 'paid'
                             : row.receivedStatus === 'partial'
-                                ? 'Partial'
-                                : (row.status || 'Created');
+                                ? 'partial'
+                                : 'pending';
+                        const linkStatus = isPaymentLinkExpired(row) ? 'Expired' : (row.status || 'created');
                         const dateText = formatDateTimeForCard(row.createdAt || row.updatedAt) || '-';
-                        const linkText = row.url ? 'Open' : 'No link';
+                        const methodText = (row.methods && row.methods.length ? row.methods : getSelectedPaymentMethods())
+                            .map(getPaymentMethodLabel)
+                            .join(' ');
                         const safeUrl = escapeHtml(row.url || '');
                         return `
                             <div class="payment-link-history-row">
                                 <div>
-                                    <strong>${index === 0 ? 'Latest: ' : ''}${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
-                                    <span>${escapeHtml(dateText)} | ${escapeHtml(status)}</span>
+                                    <strong>${escapeHtml(dateText)}</strong>
+                                    <span>Created</span>
                                 </div>
-                                ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}">${escapeHtml(linkText)}</button>` : '<span class="payment-link-history-muted">No link</span>'}
+                                <div class="payment-link-history-methods">${escapeHtml(methodText || '-')}</div>
+                                <strong>${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
+                                <span>${escapeHtml(paymentStatus)}</span>
+                                <div>
+                                    <span class="payment-link-status-pill">${escapeHtml(linkStatus)}</span>
+                                    ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}">Open</button>` : '<span class="payment-link-history-muted">No link</span>'}
+                                </div>
                             </div>
                         `;
                     }).join('');
@@ -3195,6 +3252,7 @@ lucide.createIcons();
 
         function openPaymentLinkModal() {
             renderPaymentLinkPanel(activeOrderCard);
+            setPaymentManagementTab('razorpay');
             paymentLinkModal?.classList.remove('hidden');
         }
 
@@ -3220,6 +3278,8 @@ lucide.createIcons();
                 createRazorpayLinkBtn.textContent = 'Generating...';
             }
             try {
+                const expireHours = Math.max(1, Math.min(168, Number(paymentLinkExpireHours?.value || 24) || 24));
+                const methods = getSelectedPaymentMethods();
                 const response = await whatsappFetch('/api/razorpay/payment-link', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3227,7 +3287,11 @@ lucide.createIcons();
                         orderId: identity.orderId,
                         clientId: identity.clientId,
                         currency,
-                        amount
+                        amount,
+                        methods,
+                        expireHours,
+                        acceptPartial: Boolean(paymentAcceptPartial?.checked),
+                        sendEmail: Boolean(paymentSendEmail?.checked)
                     })
                 });
                 const data = await response.json().catch(() => ({}));
@@ -3244,11 +3308,13 @@ lucide.createIcons();
                     status: link.status || 'created',
                     receivedStatus: 'not_received',
                     createdAt: link.createdAt || new Date().toISOString(),
-                    expiresAt: link.expiresAt || ''
+                    expiresAt: link.expiresAt || '',
+                    methods: link.methods || methods
                 };
                 upsertPaymentLinkHistory(activeOrderCard, entry);
                 syncLatestPaymentLinkToCard(activeOrderCard, entry);
                 renderPaymentLinkPanel(activeOrderCard);
+                setPaymentManagementTab('history');
                 persistOrderListToStorage();
             } catch (error) {
                 alert((error?.message || 'Razorpay payment link create nahi ho paya.') + '\n\nRazorpay setup ke liye Key ID, Key Secret, Webhook Secret, aur live backend URL chahiye.');
@@ -6243,6 +6309,14 @@ lucide.createIcons();
             persistOrderListToStorage();
         });
         closePaymentLinkModalBtn?.addEventListener('click', closePaymentLinkModal);
+        paymentLinkModal?.querySelectorAll('[data-payment-close]').forEach((button) => {
+            button.addEventListener('click', closePaymentLinkModal);
+        });
+        paymentLinkModal?.querySelectorAll('[data-payment-tab]').forEach((button) => {
+            button.addEventListener('click', function() {
+                setPaymentManagementTab(this.dataset.paymentTab || 'razorpay');
+            });
+        });
         paymentLinkModal?.addEventListener('click', function(event) {
             if (event.target !== paymentLinkModal) return;
             closePaymentLinkModal();

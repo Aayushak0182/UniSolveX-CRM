@@ -613,40 +613,86 @@
     </div>
 
     <div id="paymentLinkModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-        <div class="bg-white rounded-xl shadow-2xl w-[520px] max-w-[95vw] p-6">
-            <div class="mb-4 flex items-start justify-between gap-3">
+        <div class="payment-management-modal">
+            <div class="payment-management-head">
                 <div>
-                    <h3 class="text-lg font-bold">Payment Link</h3>
-                    <p class="text-xs text-gray-500">Razorpay link, payment status, and expiry details.</p>
+                    <h3>Payment Management</h3>
+                    <p>Order ID: <span id="paymentManagementOrderId">-</span></p>
                 </div>
-                <button id="closePaymentLinkModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+                <button id="closePaymentLinkModalBtn" type="button" class="payment-management-close">&times;</button>
             </div>
-            <div class="payment-link-panel">
-                <div class="payment-link-panel-head">
-                    <div>
-                        <p class="payment-link-title">Payment Amount</p>
-                        <p id="odPaymentLinkAmount" class="payment-link-amount">No amount set</p>
-                    </div>
-                    <span id="odPaymentLinkStatusBadge" class="payment-link-badge is-muted">Not Generated</span>
+            <div class="payment-management-tabs">
+                <button type="button" class="payment-management-tab is-active" data-payment-tab="razorpay">Razorpay Link</button>
+                <button type="button" class="payment-management-tab" data-payment-tab="whatsapp">WhatsApp Payment</button>
+                <button type="button" class="payment-management-tab" data-payment-tab="history">Payment History</button>
+            </div>
+            <div class="payment-management-body">
+                <div class="payment-management-view is-active" data-payment-view="razorpay">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Order Summary</h4>
+                        <div class="payment-summary-grid">
+                            <span>Order ID</span><strong id="paymentSummaryOrderId">-</strong>
+                            <span>Customer</span><strong id="paymentSummaryCustomer">-</strong>
+                            <span>Amount Due</span><strong id="odPaymentLinkAmount" class="payment-link-amount">No amount set</strong>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel payment-alert-panel">
+                        <div>
+                            <strong id="odPaymentLinkStatusBadge" class="payment-link-badge is-muted">Payment Pending</strong>
+                            <p id="odPaymentLinkUrlText">This order requires payment. Generate a payment link to send to the customer.</p>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Select Payment Methods</h4>
+                        <p class="payment-section-help">Choose which payment methods will be available to the customer</p>
+                        <div class="payment-method-grid">
+                            <label><input type="checkbox" class="payment-method-option" value="upi" checked> UPI</label>
+                            <label><input type="checkbox" class="payment-method-option" value="netbanking" checked> Netbanking</label>
+                            <label><input type="checkbox" class="payment-method-option" value="card" checked> Card</label>
+                            <label><input type="checkbox" class="payment-method-option" value="wallet" checked> Wallet</label>
+                            <label><input type="checkbox" class="payment-method-option" value="bank_transfer" checked> Bank Transfer</label>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Payment Link Options</h4>
+                        <div class="payment-options-grid">
+                            <label>
+                                <span>Expiration Time (hours)</span>
+                                <input id="paymentLinkExpireHours" type="number" min="1" max="168" value="24">
+                            </label>
+                            <div class="payment-options-checks">
+                                <label><input id="paymentAcceptPartial" type="checkbox"> Accept partial payment</label>
+                                <label><input id="paymentSendEmail" type="checkbox"> Send email to customer</label>
+                            </div>
+                        </div>
+                    </section>
                 </div>
-                <div class="payment-link-meta">
-                    <span>Received: <strong id="odPaymentLinkReceivedText">No</strong></span>
-                    <span>Validity: <strong id="odPaymentLinkValidityText">-</strong></span>
+                <div class="payment-management-view" data-payment-view="whatsapp">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">WhatsApp Payment</h4>
+                        <p class="payment-section-help">Use the latest Razorpay link with WhatsApp follow-up. Generate a link first if no link is available.</p>
+                        <div class="payment-link-meta">
+                            <span>Received: <strong id="odPaymentLinkReceivedText">No</strong></span>
+                            <span>Validity: <strong id="odPaymentLinkValidityText">-</strong></span>
+                        </div>
+                        <button id="openRazorpayLinkBtn" type="button" class="payment-link-secondary" disabled>Open Latest Link</button>
+                    </section>
                 </div>
-                <div class="payment-link-controls">
-                    <button id="createRazorpayLinkBtn" type="button" class="payment-link-primary">Generate New Razorpay Link</button>
-                    <button id="openRazorpayLinkBtn" type="button" class="payment-link-secondary" disabled>Open Latest Link</button>
+                <div class="payment-management-view" data-payment-view="history">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Regular Razorpay Payments</h4>
+                        <div id="odPaymentLinkHistoryList" class="payment-link-history-list"></div>
+                        <select id="odPaymentLinkReceivedStatus" class="payment-link-select">
+                            <option value="not_received">Payment Not Received</option>
+                            <option value="partial">Received - Partial Paid</option>
+                            <option value="complete">Received - Fully Paid</option>
+                        </select>
+                    </section>
                 </div>
-                <select id="odPaymentLinkReceivedStatus" class="payment-link-select">
-                    <option value="not_received">Payment Not Received</option>
-                    <option value="partial">Received - Partial Paid</option>
-                    <option value="complete">Received - Fully Paid</option>
-                </select>
-                <p id="odPaymentLinkUrlText" class="payment-link-url">No link yet.</p>
-                <div class="payment-link-history-wrap">
-                    <p class="payment-link-history-title">Link History</p>
-                    <div id="odPaymentLinkHistoryList" class="payment-link-history-list"></div>
-                </div>
+            </div>
+            <div class="payment-management-actions">
+                <button type="button" class="payment-link-secondary" data-payment-close>Close</button>
+                <button id="createRazorpayLinkBtn" type="button" class="payment-link-primary">Generate Payment Link</button>
             </div>
         </div>
     </div>
