@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniSolveX | Admin CRM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
+
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
+    <link rel="shortcut icon" href="/favicon.ico?v=2">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Navigation Bar -->
+    <nav class="bg-white border-b px-4 py-2 flex justify-between items-center shadow-sm">
+        <div class="brand-lockup flex items-center gap-3">
+            <div id="adminQuickMenuWrap" class="relative hidden">
+                <button id="adminQuickMenuBtn" type="button" class="admin-quick-menu-btn" title="Admin menu" aria-label="Admin menu" aria-expanded="false">
+                    <i data-lucide="menu" class="w-4 h-4"></i>
+                </button>
+                <div id="adminQuickMenu" class="admin-quick-menu hidden absolute left-0 top-[calc(100%+0.5rem)] z-40 min-w-[190px] p-1.5">
+                    <button id="navExportClientsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="sheet" class="w-4 h-4"></i>
+                        <span>Export Clients</span>
+                    </button>
+                    <button id="navExportExpertsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="files" class="w-4 h-4"></i>
+                        <span>Export Experts</span>
+                    </button>
+                    <button id="navImportExpertsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="file-up" class="w-4 h-4"></i>
+                        <span>Import Experts</span>
+                    </button>
+                    <button id="navMonthlyDataBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+                        <span>Monthly Data</span>
+                    </button>
+                </div>
+            </div>
+            <div class="brand-mark" aria-hidden="true">
+                <span class="brand-shield"></span>
+                <span class="brand-monogram">U</span>
+            </div>
+            <span class="brand-wordmark font-bold text-xl text-gray-800">
+                <span class="brand-wordmark-main">UniSolve<span class="brand-wordmark-x">X</span></span>
+                <span class="brand-wordmark-accent">CRM</span>
+            </span>
+        </div>
+        <div class="flex items-center gap-3 border-l pl-4">
+            <div id="adminServerStatusPanel" class="text-right leading-tight">
+                <div id="whatsappStatus" class="text-[11px] font-semibold text-gray-500 whitespace-nowrap">WA: checking...</div>
+                <div id="whatsappLastEvent" class="text-[10px] text-gray-400 whitespace-nowrap">Last webhook: -</div>
+            </div>
+            <span id="agentNameDisplay" class="text-sm font-medium text-gray-600">Agent: </span>
+            <button id="assignActiveChatAgentBtn" type="button" class="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                Assign Agent
+            </button>
+            <div id="agentInitialDisplay" class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold"></div>
+            <button id="themeToggleBtn" class="theme-toggle-btn" type="button" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                <i id="themeIconSun" data-lucide="sun" class="w-4 h-4"></i>
+                <i id="themeIconMoon" data-lucide="moon" class="w-4 h-4 hidden"></i>
+            </button>
+            <button id="logoutBtn" class="ml-1 px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50">
+                Logout
+            </button>
+        </div>
+    </nav>
+
+    <div id="assignAgentModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[560px] max-w-[96vw] max-h-[86vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 id="assignAgentModalTitle" class="text-lg font-bold">Assign Agent</h3>
+                    <p id="assignAgentModalSubtitle" class="text-xs text-gray-500">Choose an agent name to assign chats.</p>
+                </div>
+                <button id="closeAssignAgentModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-4 flex-1 min-h-0">
+                <div id="assignAgentAdminPanel" class="hidden rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
+                    <p class="text-xs font-bold uppercase tracking-wide text-indigo-700">Manage Agent Names</p>
+                    <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+                        <input id="assignAgentNameInput" type="text" class="flex-1 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm" placeholder="Add agent name">
+                        <button id="addAssignAgentNameBtn" type="button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Add Agent</button>
+                    </div>
+                </div>
+                <div id="assignAgentList" class="assign-agent-list overflow-y-auto custom-scrollbar rounded-xl border bg-gray-50 p-2"></div>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button id="cancelAssignAgentModalBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                <button id="confirmAssignAgentBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Assign</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <aside class="contact-panel bg-white border-r flex flex-col">
+            <div class="p-4 border-b flex items-center gap-2 contact-toolbar">
+                <div class="relative flex-1 contact-search-wrap">
+                    <i data-lucide="search" class="absolute left-3 top-2.5 text-gray-400 w-4 h-4"></i>
+                    <input id="contactSearch" type="text" placeholder="Search name or ID..." class="w-full pl-9 pr-3 py-2 bg-gray-50 border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <div class="contact-toolbar-actions">
+                    <button id="toggleContactPanelWidth" class="contact-panel-toggle p-2 border rounded-md text-gray-600 bg-white hover:bg-gray-50" title="Expand / Collapse contacts panel" aria-pressed="false" type="button">
+                        <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+                    </button>
+                    <button id="toggleArchivedViewBtn" class="archive-toggle-btn p-2 border rounded-md text-gray-600 bg-white hover:bg-gray-50" title="Show archived chats" aria-pressed="false" type="button">
+                        <i data-lucide="archive" class="w-4 h-4"></i>
+                        <span id="archivedUnreadBadge" class="archive-toggle-badge hidden">0</span>
+                    </button>
+                    <button id="addContactBtn" class="add-contact-btn px-2.5 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 whitespace-nowrap">
+                        Add Contact
+                    </button>
+                    <div class="contact-filter-wrap">
+                        <i data-lucide="list-filter" class="contact-filter-icon w-4 h-4"></i>
+                        <select id="contactFilter" class="contact-filter px-2 py-2 border rounded-md text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            <option value="">Filter</option>
+                            <option value="new">New Client</option>
+                            <option value="old">Old Client</option>
+                            <option value="tutor">Tutor</option>
+                            <option value="friend">Client's Friend</option>
+                            <option value="useless">Useless/Broker</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div id="contactList" class="flex-1 overflow-y-auto custom-scrollbar">
+            </div>
+        </aside>
+
+        <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
+            <div id="chatHeader" class="chat-header p-3 border-b bg-gray-50">
+                <div class="chat-header-bar">
+                    <div class="chat-header-profile">
+                        <div id="chatHeaderAvatar" class="chat-header-avatar">?</div>
+                        <div class="chat-header-text">
+                            <h2 id="chatHeaderTitle" class="font-bold text-gray-800">Select a contact</h2>
+                            <p id="chatHeaderStatus" class="hidden text-xs text-gray-500"></p>
+                        </div>
+                    </div>
+                    <div class="chat-header-timer-wrap">
+                        <p id="chatWindowTimer" class="text-[11px] font-mono font-medium text-red-600">EXPIRED</p>
+                    </div>
+                    <div class="chat-header-actions">
+                        <button id="createTaskBtn" class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-md">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i> Create Task Card
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="chatMessages" class="chat-wallpaper is-empty-chat flex-1 p-6 overflow-y-auto custom-scrollbar space-y-4">
+                <div class="chat-empty-state" aria-hidden="true"></div>
+            </div>
+
+            <div class="chat-composer-shell p-4 border-t bg-white">
+                <div id="chatReplyPreview" class="mb-3 hidden items-start justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                    <div class="min-w-0">
+                        <p class="font-semibold">Replying to</p>
+                        <p id="chatReplyPreviewText" class="truncate text-indigo-800"></p>
+                    </div>
+                    <button id="clearReplyBtn" type="button" class="text-xs font-semibold text-indigo-700">Clear</button>
+                </div>
+                <div id="chatForwardToolbar" class="mb-3 hidden items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <div>
+                        <p class="font-semibold">Forward mode</p>
+                        <p id="chatForwardSelectionCount">0 selected</p>
+                        <p id="chatForwardTargetHint" class="mt-1 text-[11px] text-amber-800">Select messages, then click a contact from the left list.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="cancelForwardBtn" type="button" class="rounded-md border border-amber-300 px-2 py-1 font-medium text-amber-800">Cancel</button>
+                        <button id="confirmForwardBtn" type="button" class="rounded-md bg-amber-500 px-2 py-1 font-medium text-white">Choose Contact</button>
+                    </div>
+                </div>
+                <div id="chatComposerAttachments" class="mb-3 hidden flex flex-wrap gap-2"></div>
+                <div id="chatAiModeHint" class="chat-ai-mode-hint hidden">Chat assigned to AI</div>
+                <div id="chatAssignmentHint" class="chat-ai-mode-hint hidden"></div>
+                <div class="chat-composer-bar flex items-center bg-gray-50 p-2 rounded-xl border">
+                    <input id="chatFileInput" type="file" class="hidden" multiple>
+                    <input id="chatInput" type="text" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2">
+                    <div class="chat-composer-actions flex items-center">
+                        <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
+                            <i data-lucide="paperclip" class="w-5 h-5"></i>
+                        </button>
+                        <button id="aiAssistBtn" class="p-2 text-sky-600 hover:bg-sky-50 rounded-full" title="Transfer this chat to AI">
+                            <i data-lucide="bot" class="w-5 h-5"></i>
+                        </button>
+                        <button id="notifyBtn" class="p-2 text-orange-500 hover:bg-orange-50 rounded-full" title="Send chat initiation template">
+                            <i data-lucide="message-circle-plus" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-indigo-700">
+                        <span class="text-sm font-bold">Send</span>
+                        <i data-lucide="send" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <aside class="order-panel bg-gray-50 border-l flex flex-col">
+             <div class="order-panel-top p-4 border-b bg-white space-y-3">
+                 <div class="order-tabs" role="tablist" aria-label="Order views">
+                     <button id="orderTabMine" class="order-tab-btn is-active" type="button" data-order-tab="mine">Orders</button>
+                     <button id="orderTabExpert" class="order-tab-btn" type="button" data-order-tab="expert">Expert List</button>
+                     <button id="orderTabAll" class="order-tab-btn" type="button" data-order-tab="all">All Orders</button>
+                     <button id="orderTabMonthly" class="order-tab-btn hidden" type="button" data-order-tab="monthly">Monthly Data</button>
+                 </div>
+                 <div id="orderSearchRow" class="order-search-row">
+                     <div class="relative flex-1">
+                         <i data-lucide="search" class="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400"></i>
+                         <input id="orderSearch" type="text" placeholder="Search for orders..." class="w-full pl-8 pr-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                     </div>
+                     <div class="order-filter-wrap">
+                         <i data-lucide="funnel-plus" class="order-filter-icon w-4 h-4"></i>
+                         <select id="orderDeliveryWindow" class="order-filter-select px-2 py-2 text-xs border rounded-md bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-500" aria-label="Order delivery filter" title="Filter orders">
+                             <option value="">Delivery: All</option>
+                             <option value="24h">Next 24 hours</option>
+                             <option value="2d">Next 2 days</option>
+                             <option value="7d">Next 7 days</option>
+                             <option value="past24h">Past 24 hours</option>
+                             <option value="past7d">Past 7 days</option>
+                         </select>
+                     </div>
+                 </div>
+                 <div id="monthlyDataControls" class="monthly-data-controls hidden">
+                     <label for="monthlyDataMonth" class="monthly-data-controls-label">Month</label>
+                     <input id="monthlyDataMonth" type="month" class="monthly-data-month-input" aria-label="Monthly data month selector">
+                 </div>
+             </div>
+            <div id="orderList" class="p-3 overflow-y-auto custom-scrollbar space-y-2"></div>
+        </aside>
+    </div>
+
+    <div id="taskModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-96 p-6">
+            <h3 id="taskModalTitle" class="text-lg font-bold mb-4">Create Task</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Client</label>
+                    <input id="taskClientInput" type="text" value="" placeholder="Select a contact first" readonly class="w-full mt-1 p-2 bg-gray-100 border rounded text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500 uppercase">Service Type</label>
+                    <select id="taskServiceType" class="w-full mt-1 p-2 border rounded text-sm focus:ring-2 focus:ring-indigo-500">
+                        <option>Assignment Help</option>
+                        <option>Consultation</option>
+                        <option>Live Session</option>
+                        <option>Tutoring class</option>
+                        <option>Project</option>
+                        <option>Full Course</option>
+                    </select>
+                </div>
+                <div id="liveSessionCreateFields" class="hidden space-y-2">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Session Start Time</label>
+                        <input id="taskSessionStart" type="datetime-local" class="w-full mt-1 p-2 border rounded text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Duration (Minutes)</label>
+                        <input id="taskSessionDuration" type="number" min="1" placeholder="60" class="w-full mt-1 p-2 border rounded text-sm">
+                    </div>
+                </div>
+                <div class="flex gap-2 pt-4">
+                    <button id="closeTaskModalBtn" class="flex-1 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+                    <button id="createTaskModalBtn" class="flex-1 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="clientDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[560px] max-w-[94vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Client Details</h3>
+                    <p class="text-xs text-gray-500">Review and update client profile information.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="editClientDetailsBtn" type="button" class="rounded-lg border px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50">Edit</button>
+                    <button id="closeClientDetailsBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Name</label>
+                    <input id="clientDetailsName" type="text" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">University Name</label>
+                    <input id="clientDetailsUniversity" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="University or college name">
+                </div>
+                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div>
+                        <label class="text-xs font-bold uppercase text-gray-500">Semester</label>
+                        <input id="clientDetailsSemester" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="Semester / year">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold uppercase text-gray-500">Client Timezone</label>
+                        <input id="clientDetailsTimezone" type="text" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="e.g. Asia/Kolkata">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button id="cancelClientDetailsBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button id="saveClientDetailsBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="exportClientsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[420px] max-w-[94vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Export Clients</h3>
+                    <p class="text-xs text-gray-500">Download client data by activity date range.</p>
+                </div>
+                <button id="closeExportClientsModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label for="exportClientsFromDate" class="text-xs font-bold uppercase text-gray-500">From Date</label>
+                    <input id="exportClientsFromDate" type="date" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <div>
+                    <label for="exportClientsToDate" class="text-xs font-bold uppercase text-gray-500">To Date</label>
+                    <input id="exportClientsToDate" type="date" class="mt-1 w-full rounded-md border p-2 text-sm">
+                </div>
+                <p class="text-xs text-gray-500">Filter uses client chat activity between the selected dates.</p>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button id="cancelExportClientsBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button id="confirmExportClientsBtn" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Download CSV</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="expertNotifyModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[680px] max-w-[96vw] max-h-[86vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Notify Experts</h3>
+                    <p id="expertNotifyTaskMeta" class="text-xs text-gray-500">Select experts to notify for this task.</p>
+                </div>
+                <button id="closeExpertNotifyModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-3 flex-1 min-h-0">
+                <div class="expert-notify-toolbar">
+                    <div class="expert-notify-search-wrap">
+                        <span class="expert-notify-search-icon">/</span>
+                        <input id="expertNotifySearch" type="text" class="flex-1 rounded-md border p-2 text-sm" placeholder="Search by subject, skill, name, or expert ID">
+                    </div>
+                    <label class="expert-notify-select-all inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input id="expertNotifySelectAll" type="checkbox">
+                        <span>Select All</span>
+                    </label>
+                </div>
+                <div id="expertNotifyList" class="expert-notify-list rounded-xl border bg-gray-50 p-2 overflow-y-auto"></div>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button id="cancelExpertNotifyBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                <button id="confirmExpertNotifyBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Notify Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="monthlyDataModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[1100px] max-w-[96vw] max-h-[88vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Monthly Data</h3>
+                    <p class="text-xs text-gray-500">Review monthly task, revenue, tutor expense, and profit analytics.</p>
+                </div>
+                <button id="closeMonthlyDataModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="monthly-data-controls">
+                <label for="monthlyDataMonthModal" class="monthly-data-controls-label">Month</label>
+                <input id="monthlyDataMonthModal" type="month" class="monthly-data-month-input" aria-label="Monthly data month selector">
+            </div>
+            <div id="monthlyDataModalContent" class="mt-4 flex-1 overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+
+    <input id="importExpertsFileInput" type="file" accept=".csv,text/csv" class="hidden">
+
+    <div id="orderDetailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div id="orderDetailsDialog" class="bg-white rounded-xl shadow-2xl w-[1050px] max-w-[96vw] h-[88vh] p-6">
+            <div class="sticky top-0 z-20 bg-white border-b pb-2 mb-3 flex justify-between items-center">
+                <h3 class="text-lg font-bold">Order Card Details</h3>
+                <button id="closeOrderDetailsBtn" class="text-sm px-2 py-1 rounded hover:bg-gray-100">Close</button>
+            </div>
+            <div class="order-details-summary-panel mb-4">
+                <div class="order-details-summary-grid">
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Order</span>
+                        <span id="odSummaryOrderId" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Client</span>
+                        <span id="odSummaryClientId" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Service</span>
+                        <span id="odSummaryService" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Actual Deadline</span>
+                        <span id="odSummaryActualDeadline" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Expert Deadline</span>
+                        <span id="odSummaryExpertDeadline" class="order-details-summary-value">-</span>
+                    </div>
+                    <div class="order-details-summary-chip">
+                        <span class="order-details-summary-label">Expert Payment</span>
+                        <span id="odSummaryExpertPayment" class="order-details-summary-value">Pending</span>
+                    </div>
+                </div>
+            </div>
+            <div id="orderDetailsScrollArea" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div class="md:col-span-2 space-y-3">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Work Details</label>
+                        <textarea id="odTitle" rows="3" class="w-full mt-1 p-2 border rounded-md resize-y min-h-[96px]"></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Service Type</label>
+                            <input id="odServiceType" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Status</label>
+                            <select id="odStatus" class="w-full mt-1 p-2 border rounded-md">
+                                <option>New</option>
+                                <option>In Progress</option>
+                                <option>Completed</option>
+                                <option>On Hold</option>
+                                <option>Cancelled</option>
+                                <option>Refund</option>
+                                <option>Archive</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Order ID</label>
+                            <input id="odOrderId" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Client ID</label>
+                            <input id="odClientId" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Assigned To</label>
+                            <input id="odAssignedTo" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Created By</label>
+                            <input id="odCreatedBy" type="text" readonly class="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Actual Deadline</label>
+                            <input id="odActualDeadline" type="datetime-local" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Deadline</label>
+                            <input id="odExpertDeadline" type="datetime-local" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Base Amount</label>
+                            <div class="mt-1 flex gap-2">
+                                <select id="odBaseCurrency" class="w-24 p-2 border rounded-md bg-white">
+                                    <option value="INR">INR</option>
+                                    <option value="CAD">CAD</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="AUD">AUD</option>
+                                </select>
+                                <input id="odBaseAmountValue" type="text" placeholder="Amount" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Payout</label>
+                            <div class="mt-1 flex gap-2">
+                                <input type="text" value="INR" readonly class="w-20 p-2 border rounded-md bg-gray-100 text-gray-600 cursor-not-allowed">
+                                <input id="odExpertPayout" type="text" placeholder="Amount" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Additional Charges</label>
+                            <input id="odAdditionalCharges" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Client Paid Amount</label>
+                            <div class="mt-1 flex gap-2">
+                                <select id="odClientPaidCurrency" class="w-24 p-2 border rounded-md bg-white">
+                                    <option value="INR">INR</option>
+                                    <option value="CAD">CAD</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="AUD">AUD</option>
+                                </select>
+                                <input id="odClientPaidAmount" type="text" placeholder="Amount paid by client" class="flex-1 p-2 border rounded-md">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Payment Status (Manual)</label>
+                            <select id="odPaymentStatusOverride" class="w-full mt-1 p-2 border rounded-md bg-white">
+                                <option value="auto">Auto (By Amount)</option>
+                                <option value="partial">Partial</option>
+                                <option value="complete">Complete</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Session Start Time</label>
+                            <input id="odSessionStart" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Session Duration (Min)</label>
+                            <input id="odSessionDuration" type="text" class="w-full mt-1 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 uppercase">Expert Payment Status</label>
+                            <select id="odExpertPaymentStatus" class="w-full mt-1 p-2 border rounded-md bg-white">
+                                <option value="pending">Pending</option>
+                                <option value="partial">Partially Done</option>
+                                <option value="complete">Fully Done</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Activity / Comment</label>
+                        <textarea id="odActivity" class="w-full mt-1 p-2 border rounded-md" rows="2"></textarea>
+                        <div class="mt-2 flex justify-end">
+                            <button id="saveCommentBtn" type="button" class="px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700">
+                                Save Comment
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500 uppercase">Comment History</label>
+                        <div id="odCommentHistory" class="w-full mt-1 p-2 border rounded-md bg-gray-50 min-h-[90px] max-h-[180px] overflow-y-auto text-xs text-gray-700 space-y-2"></div>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div class="bg-gray-50 border rounded-md p-3">
+                        <p class="text-xs font-bold text-gray-500 uppercase">Quick Actions</p>
+                        <ul class="mt-2 text-xs text-gray-600 space-y-1">
+                            <li><span class="font-semibold">Status:</span> <span id="odQuickStatus">-</span></li>
+                            <li><span class="font-semibold">Expert payment:</span> <span id="odQuickExpertPayment">-</span></li>
+                            <li><span class="font-semibold">Actual deadline:</span> <span id="odQuickActualDeadline">-</span></li>
+                            <li><span class="font-semibold">Expert deadline:</span> <span id="odQuickExpertDeadline">-</span></li>
+                            <li><span class="font-semibold">Order payment:</span> <span id="odQuickOrderPayment">-</span></li>
+                            <li><span class="font-semibold">Latest comment:</span> <span id="odQuickComment">-</span></li>
+                        </ul>
+                    </div>
+                    <button id="saveOrderDetailsBtn" class="w-full py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Changes</button>
+                    <div class="pt-2 grid grid-cols-1 gap-2">
+                        <button id="generatePaymentLinkBtn" type="button" class="w-full py-2 text-sm font-medium border border-violet-200 text-violet-800 bg-violet-50 rounded-md hover:bg-violet-100">Order Payment</button>
+                        <button id="openUpiQrBtn" type="button" class="w-full py-2 text-sm font-medium border border-sky-200 text-sky-800 bg-sky-50 rounded-md hover:bg-sky-100">INR Payment QR / UPI ID</button>
+                        <button id="openAttachmentPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100">Attachment</button>
+                        <button id="openManageExpertPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-amber-200 text-amber-800 bg-amber-50 rounded-md hover:bg-amber-100">Manage Expert</button>
+                        <button id="openRecordTransactionBtn" type="button" class="w-full py-2 text-sm font-medium border border-emerald-200 text-emerald-800 bg-emerald-50 rounded-md hover:bg-emerald-100">Record Transaction</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="upiQrModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl shadow-2xl w-[520px] max-w-[95vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">INR Payment QR</h3>
+                    <p id="upiQrMeta" class="text-xs text-gray-500">Scan QR or use UPI ID for this order.</p>
+                </div>
+                <button id="closeUpiQrModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="upi-qr-panel">
+                <div class="upi-qr-config">
+                    <label class="text-xs font-bold uppercase text-gray-500">Fixed PhonePe / UPI ID</label>
+                    <div class="mt-1 flex gap-2">
+                        <input id="upiIdInput" type="text" class="flex-1 rounded-md border p-2 text-sm" value="6290734570@UPI" readonly>
+                        <button id="saveUpiIdBtn" type="button" class="hidden rounded-md bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save</button>
+                    </div>
+                </div>
+                <div class="upi-qr-display">
+                    <div id="upiQrBox" class="upi-qr-box">
+                        <span>Enter UPI ID</span>
+                    </div>
+                    <div class="upi-qr-details">
+                        <p><span>Amount</span><strong id="upiQrAmount">-</strong></p>
+                        <p><span>UPI ID</span><strong id="upiQrIdText">-</strong></p>
+                        <p><span>Status</span><strong id="upiQrStatusText">Ready for scan</strong></p>
+                    </div>
+                </div>
+                <div class="upi-qr-actions">
+                    <button id="copyUpiIdBtn" type="button">Copy UPI ID</button>
+                    <button id="copyUpiLinkBtn" type="button">Copy Payment Link</button>
+                    <button id="openUpiIntentBtn" type="button">Open UPI App</button>
+                    <button id="sendUpiQrBtn" type="button">Send QR Code</button>
+                    <button id="sendUpiIdBtn" type="button">Send UPI ID</button>
+                </div>
+                <p id="upiQrHint" class="upi-qr-hint">Client can scan this QR from PhonePe, Google Pay, Paytm, or any UPI app.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="paymentLinkModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+        <div class="payment-management-modal">
+            <div class="payment-management-head">
+                <div>
+                    <h3>Payment Management</h3>
+                    <p>Order ID: <span id="paymentManagementOrderId">-</span></p>
+                </div>
+                <button id="closePaymentLinkModalBtn" type="button" class="payment-management-close">&times;</button>
+            </div>
+            <div class="payment-management-tabs">
+                <button type="button" class="payment-management-tab is-active" data-payment-tab="razorpay">Razorpay Link</button>
+                <button type="button" class="payment-management-tab" data-payment-tab="whatsapp">WhatsApp Payment</button>
+                <button type="button" class="payment-management-tab" data-payment-tab="history">Payment History</button>
+            </div>
+            <div class="payment-management-body">
+                <div class="payment-management-view is-active" data-payment-view="razorpay">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Order Summary</h4>
+                        <div class="payment-summary-grid">
+                            <span>Order ID</span><strong id="paymentSummaryOrderId">-</strong>
+                            <span>Customer</span><strong id="paymentSummaryCustomer">-</strong>
+                            <span>Amount Due</span><strong id="odPaymentLinkAmount" class="payment-link-amount">No amount set</strong>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel payment-alert-panel">
+                        <div>
+                            <strong id="odPaymentLinkStatusBadge" class="payment-link-badge is-muted">Payment Pending</strong>
+                            <p id="odPaymentLinkUrlText">This order requires payment. Generate a payment link to send to the customer.</p>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Select Payment Methods</h4>
+                        <p class="payment-section-help">Choose which payment methods will be available to the customer</p>
+                        <div class="payment-method-grid">
+                            <label><input type="checkbox" class="payment-method-option" value="upi" checked> UPI</label>
+                            <label><input type="checkbox" class="payment-method-option" value="netbanking" checked> Netbanking</label>
+                            <label><input type="checkbox" class="payment-method-option" value="card" checked> Card</label>
+                            <label><input type="checkbox" class="payment-method-option" value="wallet" checked> Wallet</label>
+                            <label><input type="checkbox" class="payment-method-option" value="bank_transfer" checked> Bank Transfer</label>
+                        </div>
+                    </section>
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Payment Link Options</h4>
+                        <div class="payment-options-grid">
+                            <label>
+                                <span>Expiration Time (hours)</span>
+                                <input id="paymentLinkExpireHours" type="number" min="1" max="168" value="24">
+                            </label>
+                            <div class="payment-options-checks">
+                                <label><input id="paymentAcceptPartial" type="checkbox"> Accept partial payment</label>
+                                <label><input id="paymentSendEmail" type="checkbox"> Send email to customer</label>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+                <div class="payment-management-view" data-payment-view="whatsapp">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">WhatsApp Payment</h4>
+                        <p class="payment-section-help">Use the latest Razorpay link with WhatsApp follow-up. Generate a link first if no link is available.</p>
+                        <div class="payment-link-meta">
+                            <span>Received: <strong id="odPaymentLinkReceivedText">No</strong></span>
+                            <span>Validity: <strong id="odPaymentLinkValidityText">-</strong></span>
+                        </div>
+                        <button id="openRazorpayLinkBtn" type="button" class="payment-link-secondary" disabled>Open Latest Link</button>
+                    </section>
+                </div>
+                <div class="payment-management-view" data-payment-view="history">
+                    <section class="payment-link-panel">
+                        <h4 class="payment-section-title">Regular Razorpay Payments</h4>
+                        <div id="odPaymentLinkHistoryList" class="payment-link-history-list"></div>
+                        <select id="odPaymentLinkReceivedStatus" class="payment-link-select">
+                            <option value="not_received">Payment Not Received</option>
+                            <option value="partial">Received - Partial Paid</option>
+                            <option value="complete">Received - Fully Paid</option>
+                        </select>
+                    </section>
+                </div>
+            </div>
+            <div class="payment-management-actions">
+                <button type="button" class="payment-link-secondary" data-payment-close>Close</button>
+                <button id="createRazorpayLinkBtn" type="button" class="payment-link-primary">Generate Payment Link</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="transactionRecordsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[720px] max-w-[96vw] max-h-[86vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Transaction Records</h3>
+                    <p id="transactionRecordsMeta" class="text-xs text-gray-500">Manage payment records for this order.</p>
+                </div>
+                <button id="closeTransactionRecordsModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="mb-4 flex justify-start">
+                <button id="openAddTransactionRecordBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Add New Record</button>
+            </div>
+            <div id="transactionRecordsList" class="flex-1 overflow-y-auto custom-scrollbar rounded-xl border bg-gray-50 p-3"></div>
+        </div>
+    </div>
+
+    <div id="addTransactionRecordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl shadow-2xl w-[620px] max-w-[95vw] max-h-[88vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Add Transaction Record</h3>
+                    <p class="text-xs text-amber-600">Please fill all required fields accurately.</p>
+                </div>
+                <button id="closeAddTransactionRecordModalBtn" type="button" class="rounded-full px-3 py-1.5 text-lg font-medium text-gray-500 hover:bg-gray-100">&times;</button>
+            </div>
+            <div class="space-y-4 flex-1 overflow-y-auto pr-1">
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Agent</label>
+                    <input id="trAgentName" type="text" readonly class="mt-1 w-full rounded-md border p-3 text-sm bg-gray-100 text-gray-600 cursor-not-allowed">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Transaction ID *</label>
+                    <input id="trTransactionId" type="text" class="mt-1 w-full rounded-md border p-3 text-sm" placeholder="Transaction ID">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Amount Paid</label>
+                    <input id="trAmountPaid" type="text" class="mt-1 w-full rounded-md border p-3 text-sm" placeholder="0">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Currency</label>
+                    <select id="trCurrency" class="mt-1 w-full rounded-md border p-3 text-sm bg-white">
+                        <option value="INR">INR</option>
+                        <option value="CAD">CAD</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="GBP">GBP</option>
+                        <option value="AUD">AUD</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Payment Method</label>
+                    <select id="trPaymentMethod" class="mt-1 w-full rounded-md border p-3 text-sm bg-white">
+                        <option value="">Select payment method</option>
+                        <option value="Remitly">Remitly</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="PayPal">PayPal</option>
+                        <option value="UPI">UPI</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase text-gray-500">Note</label>
+                    <textarea id="trNote" rows="3" class="mt-1 w-full rounded-md border p-3 text-sm" placeholder="Optional note"></textarea>
+                </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+                <button id="cancelAddTransactionRecordBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+                <button id="saveTransactionRecordBtn" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Save Transaction</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="manageExpertsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[55]">
+        <div class="bg-white rounded-xl shadow-2xl w-[980px] max-w-[96vw] max-h-[88vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Manage Experts</h3>
+                    <p id="manageExpertsMeta" class="text-xs text-gray-500">Review notified, interested, and assigned experts for this order.</p>
+                </div>
+                <button id="closeManageExpertsModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="manage-experts-tabs" role="tablist" aria-label="Manage experts">
+                <button id="manageExpertsTabNotified" class="manage-experts-tab is-active" type="button" data-manage-experts-tab="notified">Notified Experts</button>
+                <button id="manageExpertsTabInterested" class="manage-experts-tab" type="button" data-manage-experts-tab="interested">Interested Experts</button>
+                <button id="manageExpertsTabAssigned" class="manage-experts-tab" type="button" data-manage-experts-tab="assigned">Assigned Experts</button>
+            </div>
+            <div id="manageExpertsList" class="mt-4 flex-1 overflow-y-auto custom-scrollbar rounded-xl border bg-gray-50 p-3"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
