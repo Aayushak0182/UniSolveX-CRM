@@ -3271,6 +3271,69 @@ app.post('/api/whatsapp/send-upi-qr', async (req, res) => {
     }
 });
 
+app.post('/api/whatsapp/send-upi-qr', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const qrUrl = String(req.body?.qrUrl || '').trim();
+    const caption = String(req.body?.caption || '').trim();
+    if (!waId || !qrUrl) {
+        return res.status(400).json({ ok: false, error: 'waId and qrUrl are required' });
+    }
+    if (!/^https:\/\/api\.qrserver\.com\/v1\/create-qr-code\//i.test(qrUrl)) {
+        return res.status(400).json({ ok: false, error: 'Only approved QR URLs are allowed' });
+    }
+    try {
+        ensureWhatsappConfig();
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            type: 'image',
+            image: {
+                link: qrUrl,
+                ...(caption ? { caption } : {})
+            }
+        });
+        const profileName = contactsByWaId.get(waId)?.profileName || waId;
+        const timestamp = new Date().toISOString();
+        const messageId = result?.messages?.[0]?.id || '';
+        const storedMessage = {
+            id: messageId,
+            direction: 'outgoing',
+            text: caption || '[Image] UPI QR Code',
+            timestamp,
+            messageType: 'image',
+            attachmentName: 'unisolvex-upi-qr.png',
+            attachmentUrl: qrUrl,
+            mediaId: '',
+            mimeType: 'image/png',
+            status: 'sent',
+            statusTimestamp: timestamp
+        };
+        const contact = upsertContact(waId, profileName);
+        addMessage(waId, storedMessage);
+        await persistContactSnapshot(contact);
+        await persistMessageSnapshot(waId, storedMessage);
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                profileName,
+                ...storedMessage
+            }
+        });
+        return res.json({
+            ok: true,
+            id: messageId,
+            text: storedMessage.text,
+            messageType: 'image',
+            attachmentName: storedMessage.attachmentName,
+            attachmentUrl: storedMessage.attachmentUrl,
+            mimeType: storedMessage.mimeType
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'QR send failed' });
+    }
+});
+
 app.post('/api/whatsapp/initiate', async (req, res) => {
     const waId = normalizeWaId(req.body?.waId || '');
     const contactName = String(req.body?.contactName || '').trim() || 'there';

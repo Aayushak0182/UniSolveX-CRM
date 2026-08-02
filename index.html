@@ -586,10 +586,10 @@
             </div>
             <div class="upi-qr-panel">
                 <div class="upi-qr-config">
-                    <label class="text-xs font-bold uppercase text-gray-500">PhonePe / UPI ID</label>
+                    <label class="text-xs font-bold uppercase text-gray-500">Fixed PhonePe / UPI ID</label>
                     <div class="mt-1 flex gap-2">
-                        <input id="upiIdInput" type="text" class="flex-1 rounded-md border p-2 text-sm" placeholder="example@upi">
-                        <button id="saveUpiIdBtn" type="button" class="rounded-md bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save</button>
+                        <input id="upiIdInput" type="text" class="flex-1 rounded-md border p-2 text-sm" value="6290734570@UPI" readonly>
+                        <button id="saveUpiIdBtn" type="button" class="hidden rounded-md bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-700">Save</button>
                     </div>
                 </div>
                 <div class="upi-qr-display">
@@ -606,6 +606,8 @@
                     <button id="copyUpiIdBtn" type="button">Copy UPI ID</button>
                     <button id="copyUpiLinkBtn" type="button">Copy Payment Link</button>
                     <button id="openUpiIntentBtn" type="button">Open UPI App</button>
+                    <button id="sendUpiQrBtn" type="button">Send QR Code</button>
+                    <button id="sendUpiIdBtn" type="button">Send UPI ID</button>
                 </div>
                 <p id="upiQrHint" class="upi-qr-hint">Client can scan this QR from PhonePe, Google Pay, Paytm, or any UPI app.</p>
             </div>

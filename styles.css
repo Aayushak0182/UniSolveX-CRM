@@ -394,31 +394,54 @@ html[data-theme="dark"] .brand-wordmark-accent {
 .order-payment-indicator {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   margin-left: 0.35rem;
   border-radius: 999px;
-  width: 1.1rem;
-  height: 1.1rem;
-  font-size: 0.65rem;
+  padding: 0;
+  font-size: 0.62rem;
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.2;
   vertical-align: middle;
-  flex-shrink: 0;
+}
+
+.order-payment-indicator span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  font-size: 0.55rem;
+  line-height: 1;
 }
 
 .order-payment-indicator.is-paid {
+  background: #dcfce7;
+  color: #166534 !important;
+}
+
+.order-payment-indicator.is-paid span {
   background: #16a34a;
-  color: #fff !important;
+  color: #fff;
 }
 
 .order-payment-indicator.is-partial {
-  background: #d97706;
-  color: #fff !important;
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+.order-payment-indicator.is-partial span {
+  background: #92400e;
+  color: #fff;
 }
 
 .order-payment-indicator.is-pending {
+  background: transparent;
+  color: #c2410c !important;
+}
+
+.order-payment-indicator.is-pending span {
   background: #f97316;
-  color: #fff !important;
+  color: #fff;
 }
 
 #whatsappStatus {
@@ -1882,13 +1905,54 @@ html[data-theme="dark"] .chat-empty-state {
   color: #64748b;
 }
 
+.payment-history-status {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.24rem 0.52rem;
+  font-weight: 800;
+  text-transform: lowercase;
+}
+
+.payment-history-status.is-paid {
+  background: #dcfce7;
+  color: #166534 !important;
+}
+
+.payment-history-status.is-partial {
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+.payment-history-status.is-pending {
+  background: #ffedd5;
+  color: #c2410c !important;
+}
+
 .payment-link-status-pill {
   width: fit-content;
   border-radius: 999px;
-  background: #fee2e2;
-  color: #dc2626 !important;
   padding: 0.25rem 0.5rem;
   font-weight: 800;
+}
+
+.payment-link-status-pill.is-paid {
+  background: #dcfce7;
+  color: #166534 !important;
+}
+
+.payment-link-status-pill.is-partial {
+  background: #fef3c7;
+  color: #92400e !important;
+}
+
+.payment-link-status-pill.is-expired {
+  background: #fee2e2;
+  color: #dc2626 !important;
+}
+
+.payment-link-status-pill.is-created {
+  background: #e0e7ff;
+  color: #4338ca !important;
 }
 
 .payment-link-history-open {
@@ -1995,7 +2059,7 @@ html[data-theme="dark"] .chat-empty-state {
 
 .upi-qr-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 0.5rem;
   margin-top: 0.85rem;
 }

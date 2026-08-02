@@ -156,6 +156,8 @@ lucide.createIcons();
         const copyUpiIdBtn = document.getElementById('copyUpiIdBtn');
         const copyUpiLinkBtn = document.getElementById('copyUpiLinkBtn');
         const openUpiIntentBtn = document.getElementById('openUpiIntentBtn');
+        const sendUpiQrBtn = document.getElementById('sendUpiQrBtn');
+        const sendUpiIdBtn = document.getElementById('sendUpiIdBtn');
         const upiQrHint = document.getElementById('upiQrHint');
         const openAttachmentPageBtn = document.getElementById('openAttachmentPageBtn');
         const openManageExpertPageBtn = document.getElementById('openManageExpertPageBtn');
@@ -211,7 +213,7 @@ lucide.createIcons();
         const ORDER_LIST_STORAGE_KEY = 'unisolvex_order_list_html_v2';
         const CRM_STATE_SNAPSHOT_CACHE_KEY = 'unisolvex_crm_state_snapshot_v1';
         const ORDER_DETAILS_DRAFTS_STORAGE_KEY = 'unisolvex_order_details_drafts_v1';
-        const UPI_ID_STORAGE_KEY = 'unisolvex_payment_upi_id_v1';
+        const FIXED_UPI_ID = '6290734570@UPI';
         const MANUAL_CONTACTS_STORAGE_KEY = 'unisolvex_manual_contacts_v1';
         const EXPERTS_STORAGE_KEY = 'unisolvex_experts_v1';
         const WHATSAPP_CONTACT_ID_MAP_KEY = 'unisolvex_whatsapp_contact_id_map_v1';
@@ -2897,20 +2899,10 @@ lucide.createIcons();
             };
         }
 
-        function getSavedUpiId() {
-            return String(localStorage.getItem(UPI_ID_STORAGE_KEY) || '').trim();
-        }
-
-        function setSavedUpiId(value) {
-            const clean = String(value || '').replace(/\s+/g, '').trim();
-            localStorage.setItem(UPI_ID_STORAGE_KEY, clean);
-            return clean;
-        }
-
         function getUpiPaymentContext() {
             const identity = getOrderRecordIdentity(activeOrderCard);
             const { currency, amount } = getPaymentLinkAmountFromForm();
-            const upiId = String(upiIdInput?.value || getSavedUpiId()).trim();
+            const upiId = FIXED_UPI_ID;
             const amountValue = parseAmountToNumber(amount);
             const note = `UniSolveX Order ${identity.orderId || ''}`.trim();
             const params = new URLSearchParams({
@@ -2936,7 +2928,10 @@ lucide.createIcons();
             const isInr = context.currency === 'INR';
             const hasUpi = Boolean(context.upiId);
             const hasAmount = context.amountValue > 0;
-            if (upiIdInput) upiIdInput.value = context.upiId;
+            if (upiIdInput) {
+                upiIdInput.value = context.upiId;
+                upiIdInput.readOnly = true;
+            }
             if (upiQrMeta) upiQrMeta.textContent = `Order #${context.orderId || '-'} | Client ${context.clientId || '-'} | INR UPI payment`;
             if (upiQrAmount) upiQrAmount.textContent = isInr && hasAmount ? formatPaymentAmount('INR', context.amount) : 'Set INR base amount';
             if (upiQrIdText) upiQrIdText.textContent = hasUpi ? context.upiId : 'Not set';
@@ -2957,10 +2952,10 @@ lucide.createIcons();
             const canRender = isInr && hasUpi && hasAmount;
             if (upiQrBox) {
                 upiQrBox.innerHTML = canRender
-                    ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(context.uri)}" alt="UPI payment QR code">`
+                    ? `<img src="${escapeHtml(getUpiQrImageUrl(context))}" alt="UPI payment QR code">`
                     : `<span>${!isInr ? 'INR only' : !hasUpi ? 'Enter UPI ID' : 'Enter amount'}</span>`;
             }
-            [copyUpiIdBtn, copyUpiLinkBtn, openUpiIntentBtn].forEach((btn) => {
+            [copyUpiIdBtn, copyUpiLinkBtn, openUpiIntentBtn, sendUpiQrBtn, sendUpiIdBtn].forEach((btn) => {
                 if (btn) btn.disabled = !canRender;
             });
         }
@@ -2974,6 +2969,73 @@ lucide.createIcons();
             upiQrModal?.classList.add('hidden');
         }
 
+        async function sendUpiIdToActiveClient() {
+            const context = getUpiPaymentContext();
+            if (!activeWhatsappWaId) {
+                alert('WhatsApp contact select karo, phir UPI ID send hoga.');
+                return;
+            }
+            if (!context.upiId || !context.amountValue || context.currency !== 'INR') {
+                alert('INR amount set karo, phir UPI details send honge.');
+                return;
+            }
+            const text = [
+                'UniSolveX payment details',
+                `Amount: ${formatPaymentAmount('INR', context.amount)}`,
+                `UPI ID: ${context.upiId}`,
+                `Payment link: ${context.uri}`
+            ].join('\n');
+            const response = await whatsappFetch('/api/whatsapp/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ waId: normalizeWaId(activeWhatsappWaId), text })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) throw new Error(data?.error || 'UPI ID send nahi ho paya.');
+            appendLocalOutgoingMessage(activeWhatsappWaId, {
+                id: data?.id || makeTempMessageId('upi'),
+                text,
+                messageType: 'text',
+                status: 'sent'
+            });
+            renderWhatsappMessages(activeWhatsappWaId);
+        }
+
+        async function sendUpiQrToActiveClient() {
+            const context = getUpiPaymentContext();
+            if (!activeWhatsappWaId) {
+                alert('WhatsApp contact select karo, phir QR code send hoga.');
+                return;
+            }
+            if (!context.upiId || !context.amountValue || context.currency !== 'INR') {
+                alert('INR amount set karo, phir QR code send hoga.');
+                return;
+            }
+            const caption = `UniSolveX payment QR\nAmount: ${formatPaymentAmount('INR', context.amount)}\nUPI ID: ${context.upiId}`;
+            const response = await whatsappFetch('/api/whatsapp/send-upi-qr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    waId: normalizeWaId(activeWhatsappWaId),
+                    caption,
+                    qrUrl: getUpiQrImageUrl(context)
+                })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data?.ok) throw new Error(data?.error || 'QR code send nahi ho paya.');
+            appendLocalOutgoingMessage(activeWhatsappWaId, {
+                id: data?.id || makeTempMessageId('upi_qr'),
+                text: data?.text || caption,
+                messageType: 'image',
+                attachmentName: data?.attachmentName || `unisolvex-payment-${context.orderId || Date.now()}.png`,
+                attachmentUrl: data?.attachmentUrl || '',
+                mediaId: data?.mediaId || '',
+                mimeType: data?.mimeType || 'image/png',
+                status: 'sent'
+            });
+            renderWhatsappMessages(activeWhatsappWaId);
+        }
+
         async function copyTextToClipboard(text, successMessage) {
             const value = String(text || '').trim();
             if (!value) return;
@@ -2983,6 +3045,10 @@ lucide.createIcons();
             } catch {
                 window.prompt('Copy this value:', value);
             }
+        }
+
+        function getUpiQrImageUrl(context = getUpiPaymentContext()) {
+            return `https://api.qrserver.com/v1/create-qr-code/?size=520x520&data=${encodeURIComponent(context.uri)}`;
         }
 
         function getPaymentLinkState(card = activeOrderCard) {
@@ -3094,6 +3160,13 @@ lucide.createIcons();
             return isPaymentLinkExpired(state) ? 'expired' : 'active';
         }
 
+        function getPaymentReceivedStatusFromAmounts(card) {
+            const totalAmount = parseAmountToNumber(card?.querySelector('.order-amount')?.textContent || '');
+            const paidAmount = parseAmountToNumber(card?.dataset.clientPaidAmount || '');
+            if (!totalAmount || !paidAmount) return 'not_received';
+            return paidAmount >= totalAmount ? 'complete' : 'partial';
+        }
+
         function setPaymentManagementTab(tabName) {
             const target = String(tabName || 'razorpay').trim() || 'razorpay';
             paymentLinkModal?.querySelectorAll('[data-payment-tab]').forEach((button) => {
@@ -3128,10 +3201,6 @@ lucide.createIcons();
         function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
             const query = new URLSearchParams({
                 amount: String(amount || ''),
-
-        function buildRazorpayPaymentUrl(orderId, clientId, currency, amount) {
-            const query = new URLSearchParams({
-                amount: String(amount || ''),
                 currency: String(currency || 'INR').toUpperCase(),
                 order_id: String(orderId || ''),
                 client_id: String(clientId || '')
@@ -3156,22 +3225,6 @@ lucide.createIcons();
             }
             syncOrderPaymentIndicator(card);
             updateOrderDetailsSummary(card);
-
-            // Sync current active order modal inputs in real time
-            if (card === activeOrderCard) {
-                const manualStatusSelect = document.getElementById('odPaymentStatusOverride');
-                if (manualStatusSelect) {
-                    manualStatusSelect.value = card.dataset.paymentStatusOverride || 'auto';
-                }
-                const clientPaidAmountInput = document.getElementById('odClientPaidAmount');
-                if (clientPaidAmountInput) {
-                    clientPaidAmountInput.value = card.dataset.clientPaidAmount || '';
-                }
-                const clientPaidCurrencySelect = document.getElementById('odClientPaidCurrency');
-                if (clientPaidCurrencySelect) {
-                    clientPaidCurrencySelect.value = card.dataset.clientPaidCurrency || 'INR';
-                }
-            }
         }
 
         function applyRazorpayPaymentUpdates(map) {
@@ -3193,19 +3246,20 @@ lucide.createIcons();
                         expiresAt: row.expiresAt,
                         createdAt: row.createdAt || row.updatedAt,
                         updatedAt: row.updatedAt,
-                        event: row.event
+                        event: row.event,
+                        methods: row.methods
                     }];
                 links.forEach((link) => upsertPaymentLinkHistory(card, link));
                 const latest = parsePaymentLinkHistory(card)[0];
                 if (latest) syncLatestPaymentLinkToCard(card, latest);
                 if (row.updatedAt) card.dataset.paymentLinkUpdatedAt = String(row.updatedAt || '');
-                
-                // Always sync the order payment indicator
-                syncOrderPaymentIndicator(card);
-
-                if (row.receivedStatus === 'partial' || row.receivedStatus === 'complete') {
-                    syncPaymentReceivedToOrder(card, row.receivedStatus);
+                const effectiveReceivedStatus = row.receivedStatus === 'partial' || row.receivedStatus === 'complete'
+                    ? row.receivedStatus
+                    : latest?.receivedStatus;
+                if (effectiveReceivedStatus === 'partial' || effectiveReceivedStatus === 'complete') {
+                    syncPaymentReceivedToOrder(card, effectiveReceivedStatus);
                 } else {
+                    syncOrderPaymentIndicator(card);
                     renderPaymentLinkPanel(card);
                 }
             });
@@ -3318,7 +3372,26 @@ lucide.createIcons();
                             : row.receivedStatus === 'partial'
                                 ? 'partial'
                                 : 'pending';
-                        const linkStatus = isPaymentLinkExpired(row) ? 'Expired' : (row.status || 'created');
+                        const rawLinkStatus = String(row.status || 'created').trim().toLowerCase();
+                        const linkStatus = paymentStatus === 'paid'
+                            ? 'paid'
+                            : paymentStatus === 'partial'
+                                ? 'partial'
+                                : isPaymentLinkExpired(row)
+                                    ? 'expired'
+                                    : rawLinkStatus;
+                        const paymentStatusClass = paymentStatus === 'paid'
+                            ? 'is-paid'
+                            : paymentStatus === 'partial'
+                                ? 'is-partial'
+                                : 'is-pending';
+                        const linkStatusClass = linkStatus === 'paid'
+                            ? 'is-paid'
+                            : linkStatus === 'partial'
+                                ? 'is-partial'
+                                : linkStatus === 'expired'
+                                    ? 'is-expired'
+                                    : 'is-created';
                         const dateText = formatDateTimeForCard(row.createdAt || row.updatedAt) || '-';
                         const methodText = (row.methods && row.methods.length ? row.methods : getSelectedPaymentMethods())
                             .map(getPaymentMethodLabel)
@@ -3332,9 +3405,9 @@ lucide.createIcons();
                                 </div>
                                 <div class="payment-link-history-methods">${escapeHtml(methodText || '-')}</div>
                                 <strong>${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
-                                <span>${escapeHtml(paymentStatus)}</span>
+                                <span class="payment-history-status ${paymentStatusClass}">${escapeHtml(paymentStatus)}</span>
                                 <div>
-                                    <span class="payment-link-status-pill">${escapeHtml(linkStatus)}</span>
+                                    <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
                                     ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}">Open</button>` : '<span class="payment-link-history-muted">No link</span>'}
                                 </div>
                             </div>
@@ -3409,7 +3482,6 @@ lucide.createIcons();
                 };
                 upsertPaymentLinkHistory(activeOrderCard, entry);
                 syncLatestPaymentLinkToCard(activeOrderCard, entry);
-                syncOrderPaymentIndicator(activeOrderCard);
                 renderPaymentLinkPanel(activeOrderCard);
                 setPaymentManagementTab('history');
                 persistOrderListToStorage();
@@ -3443,75 +3515,68 @@ lucide.createIcons();
             const hasPaymentInfo = paidAmount > 0 && totalAmount > 0;
             const linkState = getPaymentLinkState(card);
             const linkDisplayStatus = getPaymentLinkDisplayStatus(linkState);
+            const amountStatus = getPaymentReceivedStatusFromAmounts(card);
 
-            // 1. Manual/explicit overrides check
             if (manualStatus === 'complete') {
                 indicatorEl.className = 'order-payment-indicator is-paid';
-                indicatorEl.innerHTML = '&#10003;';
-                indicatorEl.title = 'Payment Paid';
-                indicatorEl.classList.remove('hidden');
+                indicatorEl.title = 'Payment complete';
+                indicatorEl.innerHTML = '<span>&#10003;</span>';
                 return;
             }
 
             if (manualStatus === 'partial') {
                 indicatorEl.className = 'order-payment-indicator is-partial';
-                indicatorEl.innerHTML = '...';
-                indicatorEl.title = 'Partially Paid';
-                indicatorEl.classList.remove('hidden');
+                indicatorEl.title = 'Payment partially received';
+                indicatorEl.innerHTML = '<span>...</span>';
                 return;
             }
 
-            // 2. Paid amount vs total amount check (works for manual updates and Razorpay webhook updates)
-            if (hasPaymentInfo && paidAmount >= totalAmount) {
+            if (amountStatus === 'complete') {
                 indicatorEl.className = 'order-payment-indicator is-paid';
-                indicatorEl.innerHTML = '&#10003;';
-                indicatorEl.title = 'Payment Paid';
-                indicatorEl.classList.remove('hidden');
+                indicatorEl.title = 'Payment complete';
+                indicatorEl.innerHTML = '<span>&#10003;</span>';
                 return;
             }
 
-            if (hasPaymentInfo && paidAmount > 0 && paidAmount < totalAmount) {
+            if (amountStatus === 'partial') {
                 indicatorEl.className = 'order-payment-indicator is-partial';
-                indicatorEl.innerHTML = '...';
-                indicatorEl.title = 'Partially Paid';
-                indicatorEl.classList.remove('hidden');
+                indicatorEl.title = 'Payment partially received';
+                indicatorEl.innerHTML = '<span>...</span>';
                 return;
             }
 
-            // 3. Payment link pending check (only if not fully/partially paid based on amounts)
+            if (linkState.receivedStatus === 'complete' || linkDisplayStatus === 'paid_full') {
+                indicatorEl.className = 'order-payment-indicator is-paid';
+                indicatorEl.title = 'Payment complete';
+                indicatorEl.innerHTML = '<span>&#10003;</span>';
+                return;
+            }
+
+            if (linkState.receivedStatus === 'partial' || linkDisplayStatus === 'paid_partial') {
+                indicatorEl.className = 'order-payment-indicator is-partial';
+                indicatorEl.title = 'Payment partially received';
+                indicatorEl.innerHTML = '<span>...</span>';
+                return;
+            }
+
             if (linkState.url && (linkDisplayStatus === 'active' || linkDisplayStatus === 'not_generated')) {
                 indicatorEl.className = 'order-payment-indicator is-pending';
-                indicatorEl.innerHTML = '...';
-                indicatorEl.title = 'Payment Pending';
-                indicatorEl.classList.remove('hidden');
+                indicatorEl.title = 'Payment pending';
+                indicatorEl.innerHTML = '<span>...</span>';
                 return;
             }
 
-            // 4. Default case: no payment info
-            indicatorEl.className = 'order-payment-indicator hidden ml-1';
-            indicatorEl.textContent = '';
+            if (!hasPaymentInfo) {
+                indicatorEl.className = 'order-payment-indicator hidden ml-1';
+                indicatorEl.title = '';
+                indicatorEl.textContent = '';
+            }
         }
 
         function syncOrderExpertPaymentIndicator(card) {
             const payoutEl = card.querySelector('.order-expert-pay');
             if (!payoutEl) return;
 
-            const line = payoutEl.closest('p');
-            if (!line) return;
-
-            let indicatorEl = line.querySelector('.order-expert-payment-indicator');
-            if (!indicatorEl) {
-                indicatorEl = document.createElement('span');
-                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
-                line.appendChild(indicatorEl);
-            }
-
-            const payoutAmount = parseAmountToNumber(payoutEl.textContent || '');
-            const manualStatus = String(card.dataset.expertPaymentStatus || 'pending').toLowerCase();
-
-            if (!payoutAmount) {
-                indicatorEl.className = 'order-expert-payment-indicator hidden ml-1';
-                indicatorEl.textContent = '';
             const line = payoutEl.closest('p');
             if (!line) return;
 
@@ -6329,7 +6394,17 @@ lucide.createIcons();
             const clientPaidCurrency = document.getElementById('odClientPaidCurrency').value.trim() || 'INR';
             const clientPaidAmount = document.getElementById('odClientPaidAmount').value.trim();
             const paymentStatusOverride = document.getElementById('odPaymentStatusOverride').value.trim() || 'auto';
-            const paymentLinkReceivedStatus = String(odPaymentLinkReceivedStatus?.value || activeOrderCard.dataset.paymentLinkReceivedStatus || 'not_received').trim() || 'not_received';
+            let paymentLinkReceivedStatus = String(odPaymentLinkReceivedStatus?.value || activeOrderCard.dataset.paymentLinkReceivedStatus || 'not_received').trim() || 'not_received';
+            const baseAmountNumber = parseAmountToNumber(baseAmountValue);
+            const clientPaidAmountNumber = parseAmountToNumber(clientPaidAmount);
+            const amountReceivedStatus = baseAmountNumber && clientPaidAmountNumber
+                ? (clientPaidAmountNumber >= baseAmountNumber ? 'complete' : 'partial')
+                : 'not_received';
+            if (paymentStatusOverride === 'complete' || paymentStatusOverride === 'partial') {
+                paymentLinkReceivedStatus = paymentStatusOverride;
+            } else if (amountReceivedStatus === 'complete' || amountReceivedStatus === 'partial') {
+                paymentLinkReceivedStatus = amountReceivedStatus;
+            }
             const expertPaymentStatus = (odExpertPaymentStatusInput?.value || 'pending').trim() || 'pending';
             const sessionStart = document.getElementById('odSessionStart').value.trim();
             const sessionDuration = document.getElementById('odSessionDuration').value.trim();
@@ -6350,6 +6425,21 @@ lucide.createIcons();
             if (activeOrderCard.dataset.paymentLinkUrl) {
                 activeOrderCard.dataset.paymentLinkAmount = baseAmountValue;
                 activeOrderCard.dataset.paymentLinkCurrency = baseCurrency;
+                const latest = getPaymentLinkState(activeOrderCard);
+                upsertPaymentLinkHistory(activeOrderCard, {
+                    ...latest,
+                    amount: baseAmountValue,
+                    currency: baseCurrency,
+                    amountPaid: clientPaidAmount,
+                    receivedStatus: paymentLinkReceivedStatus,
+                    status: paymentLinkReceivedStatus === 'complete'
+                        ? 'paid'
+                        : paymentLinkReceivedStatus === 'partial'
+                            ? 'partially_paid'
+                            : latest.status,
+                    updatedAt: new Date().toISOString()
+                });
+                syncLatestPaymentLinkToCard(activeOrderCard, parsePaymentLinkHistory(activeOrderCard)[0]);
             }
             syncPaymentReceivedToOrder(activeOrderCard, paymentLinkReceivedStatus);
             activeOrderCard.dataset.expertPaymentStatus = expertPaymentStatus;
@@ -6463,12 +6553,6 @@ lucide.createIcons();
             closeUpiQrModal();
         });
         saveUpiIdBtn?.addEventListener('click', function() {
-            const upiId = setSavedUpiId(upiIdInput?.value || '');
-            if (!upiId) {
-                alert('UPI ID enter karo, example: name@upi');
-                renderUpiQrModal();
-                return;
-            }
             renderUpiQrModal();
         });
         upiIdInput?.addEventListener('input', renderUpiQrModal);
@@ -6482,6 +6566,28 @@ lucide.createIcons();
             const context = getUpiPaymentContext();
             if (!context.upiId || !context.amountValue || context.currency !== 'INR') return;
             window.open(context.uri, '_blank', 'noopener,noreferrer');
+        });
+        sendUpiIdBtn?.addEventListener('click', async function() {
+            try {
+                this.disabled = true;
+                await sendUpiIdToActiveClient();
+                alert('UPI ID sent to client.');
+            } catch (error) {
+                alert(error?.message || 'UPI ID send nahi ho paya.');
+            } finally {
+                renderUpiQrModal();
+            }
+        });
+        sendUpiQrBtn?.addEventListener('click', async function() {
+            try {
+                this.disabled = true;
+                await sendUpiQrToActiveClient();
+                alert('QR code sent to client.');
+            } catch (error) {
+                alert(error?.message || 'QR code send nahi ho paya.');
+            } finally {
+                renderUpiQrModal();
+            }
         });
         ['odBaseCurrency', 'odBaseAmountValue'].forEach((id) => {
             document.getElementById(id)?.addEventListener('input', function() {
