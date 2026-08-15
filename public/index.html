@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
 
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2">
-    <link rel="shortcut icon" href="/favicon.ico?v=2">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=3">
+    <link rel="shortcut icon" href="/favicon.ico?v=3">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -565,6 +565,7 @@
                     <button id="saveOrderDetailsBtn" class="w-full py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700">Save Changes</button>
                     <div class="pt-2 grid grid-cols-1 gap-2">
                         <button id="generatePaymentLinkBtn" type="button" class="w-full py-2 text-sm font-medium border border-violet-200 text-violet-800 bg-violet-50 rounded-md hover:bg-violet-100">Order Payment</button>
+                        <button id="updatePaymentBtn" type="button" class="w-full py-2 text-sm font-medium border border-emerald-200 text-emerald-800 bg-emerald-50 rounded-md hover:bg-emerald-100">Update Payment</button>
                         <button id="openUpiQrBtn" type="button" class="w-full py-2 text-sm font-medium border border-sky-200 text-sky-800 bg-sky-50 rounded-md hover:bg-sky-100">INR Payment QR / UPI ID</button>
                         <button id="openAttachmentPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100">Attachment</button>
                         <button id="openManageExpertPageBtn" type="button" class="w-full py-2 text-sm font-medium border border-amber-200 text-amber-800 bg-amber-50 rounded-md hover:bg-amber-100">Manage Expert</button>
@@ -610,6 +611,50 @@
                     <button id="sendUpiIdBtn" type="button">Send UPI ID</button>
                 </div>
                 <p id="upiQrHint" class="upi-qr-hint">Client can scan this QR from PhonePe, Google Pay, Paytm, or any UPI app.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="updatePaymentModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[65]">
+        <div class="update-payment-modal">
+            <div class="update-payment-head">
+                <div>
+                    <h3>Update Payment</h3>
+                    <p id="updatePaymentMeta">Order payment status</p>
+                </div>
+                <button id="closeUpdatePaymentModalBtn" type="button" class="update-payment-close">&times;</button>
+            </div>
+            <div class="update-payment-body">
+                <label>
+                    <span>Payment Status</span>
+                    <select id="updatePaymentStatus">
+                        <option value="partial">Partial Paid</option>
+                        <option value="complete">Full Payment</option>
+                        <option value="auto">Auto / Pending</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Paid Amount</span>
+                    <div class="update-payment-amount-row">
+                        <select id="updatePaymentCurrency">
+                            <option value="INR">INR</option>
+                            <option value="CAD">CAD</option>
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                            <option value="AUD">AUD</option>
+                        </select>
+                        <input id="updatePaymentAmount" type="text" placeholder="Amount paid">
+                    </div>
+                </label>
+                <label>
+                    <span>Payment Note</span>
+                    <textarea id="updatePaymentNote" rows="3" placeholder="Optional note"></textarea>
+                </label>
+            </div>
+            <div class="update-payment-actions">
+                <button id="cancelUpdatePaymentBtn" type="button" class="payment-link-secondary">Close</button>
+                <button id="saveUpdatePaymentBtn" type="button" class="payment-link-primary">Save Update</button>
             </div>
         </div>
     </div>
@@ -682,7 +727,7 @@
                 </div>
                 <div class="payment-management-view" data-payment-view="history">
                     <section class="payment-link-panel">
-                        <h4 class="payment-section-title">Regular Razorpay Payments</h4>
+                        <h4 class="payment-section-title payment-section-title-with-icon"><i data-lucide="credit-card" class="w-4 h-4"></i>Regular Razorpay Payments</h4>
                         <div id="odPaymentLinkHistoryList" class="payment-link-history-list"></div>
                         <select id="odPaymentLinkReceivedStatus" class="payment-link-select">
                             <option value="not_received">Payment Not Received</option>

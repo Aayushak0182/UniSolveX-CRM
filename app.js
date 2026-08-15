@@ -126,6 +126,7 @@ lucide.createIcons();
         const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
         const odExpertPaymentStatusInput = document.getElementById('odExpertPaymentStatus');
         const generatePaymentLinkBtn = document.getElementById('generatePaymentLinkBtn');
+        const updatePaymentBtn = document.getElementById('updatePaymentBtn');
         const createRazorpayLinkBtn = document.getElementById('createRazorpayLinkBtn');
         const paymentLinkModal = document.getElementById('paymentLinkModal');
         const closePaymentLinkModalBtn = document.getElementById('closePaymentLinkModalBtn');
@@ -159,6 +160,15 @@ lucide.createIcons();
         const sendUpiQrBtn = document.getElementById('sendUpiQrBtn');
         const sendUpiIdBtn = document.getElementById('sendUpiIdBtn');
         const upiQrHint = document.getElementById('upiQrHint');
+        const updatePaymentModal = document.getElementById('updatePaymentModal');
+        const updatePaymentMeta = document.getElementById('updatePaymentMeta');
+        const closeUpdatePaymentModalBtn = document.getElementById('closeUpdatePaymentModalBtn');
+        const cancelUpdatePaymentBtn = document.getElementById('cancelUpdatePaymentBtn');
+        const saveUpdatePaymentBtn = document.getElementById('saveUpdatePaymentBtn');
+        const updatePaymentStatusInput = document.getElementById('updatePaymentStatus');
+        const updatePaymentCurrencyInput = document.getElementById('updatePaymentCurrency');
+        const updatePaymentAmountInput = document.getElementById('updatePaymentAmount');
+        const updatePaymentNoteInput = document.getElementById('updatePaymentNote');
         const openAttachmentPageBtn = document.getElementById('openAttachmentPageBtn');
         const openManageExpertPageBtn = document.getElementById('openManageExpertPageBtn');
         const openRecordTransactionBtn = document.getElementById('openRecordTransactionBtn');
@@ -249,6 +259,17 @@ lucide.createIcons();
             window.history.replaceState(window.history.state, document.title, cleanUrl);
         }
         cleanRazorpayCallbackUrl();
+        function enforceStaticCrmUrl() {
+            if (!window.history || !window.history.replaceState) return;
+            if (window.location.hostname !== 'unisolvex-crm.netlify.app') return;
+            const staticUrl = `${window.location.origin}/`;
+            if (window.location.href !== staticUrl) {
+                window.history.replaceState(window.history.state, document.title, staticUrl);
+            }
+        }
+        enforceStaticCrmUrl();
+        window.addEventListener('click', () => setTimeout(enforceStaticCrmUrl, 0), true);
+        window.addEventListener('popstate', enforceStaticCrmUrl);
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
@@ -3175,6 +3196,10 @@ lucide.createIcons();
             paymentLinkModal?.querySelectorAll('[data-payment-view]').forEach((view) => {
                 view.classList.toggle('is-active', view.dataset.paymentView === target);
             });
+            if (createRazorpayLinkBtn) {
+                createRazorpayLinkBtn.classList.toggle('hidden', target !== 'razorpay');
+                createRazorpayLinkBtn.textContent = 'Generate Razorpay Link';
+            }
             if (target === 'history') {
                 refreshPaymentStatusForActiveOrder();
             }
@@ -3366,7 +3391,7 @@ lucide.createIcons();
                 if (!history.length) {
                     odPaymentLinkHistoryList.innerHTML = '<p class="payment-link-history-empty">No Razorpay link generated yet.</p>';
                 } else {
-                    odPaymentLinkHistoryList.innerHTML = history.map((row) => {
+                    const rowsHtml = history.map((row) => {
                         const paymentStatus = row.receivedStatus === 'complete'
                             ? 'paid'
                             : row.receivedStatus === 'partial'
@@ -3395,25 +3420,38 @@ lucide.createIcons();
                         const dateText = formatDateTimeForCard(row.createdAt || row.updatedAt) || '-';
                         const methodText = (row.methods && row.methods.length ? row.methods : getSelectedPaymentMethods())
                             .map(getPaymentMethodLabel)
-                            .join(' ');
+                            .join('   ');
                         const safeUrl = escapeHtml(row.url || '');
                         return `
                             <div class="payment-link-history-row">
+                                <span class="payment-history-expand" aria-hidden="true">&#8964;</span>
                                 <div>
                                     <strong>${escapeHtml(dateText)}</strong>
-                                    <span>Created</span>
                                 </div>
                                 <div class="payment-link-history-methods">${escapeHtml(methodText || '-')}</div>
                                 <strong>${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
                                 <span class="payment-history-status ${paymentStatusClass}">${escapeHtml(paymentStatus)}</span>
-                                <div>
-                                    <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
-                                    ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}">Open</button>` : '<span class="payment-link-history-muted">No link</span>'}
-                                </div>
+                                <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
+                                ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}" title="Open payment link" aria-label="Open payment link"><i data-lucide="external-link" class="w-4 h-4"></i></button>` : '<span class="payment-link-history-muted">No link</span>'}
                             </div>
                         `;
                     }).join('');
+                    odPaymentLinkHistoryList.innerHTML = `
+                        <div class="payment-link-history-table">
+                            <div class="payment-link-history-head">
+                                <span></span>
+                                <span>Created</span>
+                                <span>Methods</span>
+                                <span>Amount</span>
+                                <span>Payment Status</span>
+                                <span>Link Status</span>
+                                <span>Link</span>
+                            </div>
+                            ${rowsHtml}
+                        </div>
+                    `;
                 }
+                lucide.createIcons({ attrs: { 'stroke-width': 2 } });
             }
         }
 
@@ -3427,6 +3465,72 @@ lucide.createIcons();
         function closePaymentLinkModal() {
             stopPaymentStatusRefreshTimer();
             paymentLinkModal?.classList.add('hidden');
+        }
+
+        function openUpdatePaymentModal() {
+            if (!activeOrderCard || !updatePaymentModal) return;
+            const identity = getOrderRecordIdentity(activeOrderCard);
+            const baseAmount = activeOrderCard.querySelector('.order-amount')?.textContent?.trim() || '';
+            if (updatePaymentMeta) {
+                updatePaymentMeta.textContent = `Order #${identity.orderId || '-'} | Due ${baseAmount || '-'}`;
+            }
+            if (updatePaymentStatusInput) updatePaymentStatusInput.value = activeOrderCard.dataset.paymentStatusOverride || 'partial';
+            if (updatePaymentCurrencyInput) updatePaymentCurrencyInput.value = activeOrderCard.dataset.clientPaidCurrency || getPaymentLinkAmountFromForm().currency || 'INR';
+            if (updatePaymentAmountInput) updatePaymentAmountInput.value = activeOrderCard.dataset.clientPaidAmount || '';
+            if (updatePaymentNoteInput) updatePaymentNoteInput.value = '';
+            updatePaymentModal.classList.remove('hidden');
+        }
+
+        function closeUpdatePaymentModal() {
+            updatePaymentModal?.classList.add('hidden');
+        }
+
+        function saveUpdatePaymentForActiveOrder() {
+            if (!activeOrderCard) return;
+            const status = String(updatePaymentStatusInput?.value || 'auto').trim() || 'auto';
+            const currency = String(updatePaymentCurrencyInput?.value || 'INR').trim().toUpperCase() || 'INR';
+            const amount = String(updatePaymentAmountInput?.value || '').trim();
+            const note = String(updatePaymentNoteInput?.value || '').trim();
+            const total = parseAmountToNumber(activeOrderCard.querySelector('.order-amount')?.textContent || '');
+            const amountNumber = parseAmountToNumber(amount);
+            if ((status === 'partial' || status === 'complete') && !amountNumber) {
+                alert('Paid amount add karo.');
+                return;
+            }
+            activeOrderCard.dataset.clientPaidCurrency = currency;
+            activeOrderCard.dataset.clientPaidAmount = amount;
+            activeOrderCard.dataset.paymentStatusOverride = status;
+            const receivedStatus = status === 'complete'
+                ? 'complete'
+                : status === 'partial'
+                    ? 'partial'
+                    : (total && amountNumber ? (amountNumber >= total ? 'complete' : 'partial') : 'not_received');
+            activeOrderCard.dataset.paymentLinkReceivedStatus = receivedStatus;
+            if (activeOrderCard.dataset.paymentLinkId || activeOrderCard.dataset.paymentLinkUrl) {
+                const latest = getPaymentLinkState(activeOrderCard);
+                upsertPaymentLinkHistory(activeOrderCard, {
+                    ...latest,
+                    amountPaid: amount,
+                    receivedStatus,
+                    updatedAt: new Date().toISOString(),
+                    event: 'manual_payment_update'
+                });
+            }
+            const paidCurrencyInput = document.getElementById('odClientPaidCurrency');
+            const paidAmountInput = document.getElementById('odClientPaidAmount');
+            const paymentStatusInput = document.getElementById('odPaymentStatusOverride');
+            if (paidCurrencyInput) paidCurrencyInput.value = currency;
+            if (paidAmountInput) paidAmountInput.value = amount;
+            if (paymentStatusInput) paymentStatusInput.value = status;
+            if (odPaymentLinkReceivedStatus) odPaymentLinkReceivedStatus.value = receivedStatus;
+            if (note) {
+                appendCommentToActiveCard(`Payment update: ${status.replace('complete', 'full payment')} - ${currency} ${amount}. ${note}`);
+            }
+            syncOrderPaymentIndicator(activeOrderCard);
+            updateOrderDetailsSummary(activeOrderCard);
+            renderPaymentLinkPanel(activeOrderCard);
+            persistOrderListToStorage();
+            closeUpdatePaymentModal();
         }
 
         async function createRazorpayPaymentLinkForActiveOrder() {
@@ -4828,6 +4932,26 @@ lucide.createIcons();
             return hh + ':' + mm + ' ' + ampm;
         }
 
+        function getChatDateKey(ts) {
+            const d = ts ? new Date(ts) : new Date();
+            if (Number.isNaN(d.getTime())) return '';
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function getTodayDateKey() {
+            return getChatDateKey(new Date().toISOString());
+        }
+
+        function formatChatDateSeparator(ts) {
+            const d = ts ? new Date(ts) : new Date();
+            if (Number.isNaN(d.getTime())) return '';
+            const yesterday = new Date();
+            yesterday.setHours(0, 0, 0, 0);
+            yesterday.setDate(yesterday.getDate() - 1);
+            if (getChatDateKey(ts) === getChatDateKey(yesterday.toISOString())) return 'Yesterday';
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
         function isMediaMessageType(messageType) {
             return ['image', 'document', 'audio', 'video'].includes(String(messageType || '').toLowerCase());
         }
@@ -5131,8 +5255,18 @@ lucide.createIcons();
                 updateChatWindowState(waId);
                 return;
             }
+            let previousDateKey = '';
+            const todayDateKey = getTodayDateKey();
             messages.forEach((msg) => {
                 const clientKey = ensureMessageClientKey(msg);
+                const messageDateKey = getChatDateKey(msg.timestamp);
+                if (messageDateKey && messageDateKey !== todayDateKey && messageDateKey !== previousDateKey) {
+                    const dateWrap = document.createElement('div');
+                    dateWrap.className = 'chat-date-separator';
+                    dateWrap.textContent = formatChatDateSeparator(msg.timestamp);
+                    chatMessages.appendChild(dateWrap);
+                }
+                if (messageDateKey) previousDateKey = messageDateKey;
                 const wrap = document.createElement('div');
                 const incoming = msg.direction === 'incoming';
                 const statusTick = incoming ? '' : getStatusTickHtml(msg.status, msg.errorReason);
@@ -6504,6 +6638,14 @@ lucide.createIcons();
         generatePaymentLinkBtn?.addEventListener('click', function() {
             if (!activeOrderCard) return;
             openPaymentLinkModal();
+        });
+        updatePaymentBtn?.addEventListener('click', openUpdatePaymentModal);
+        closeUpdatePaymentModalBtn?.addEventListener('click', closeUpdatePaymentModal);
+        cancelUpdatePaymentBtn?.addEventListener('click', closeUpdatePaymentModal);
+        saveUpdatePaymentBtn?.addEventListener('click', saveUpdatePaymentForActiveOrder);
+        updatePaymentModal?.addEventListener('click', function(event) {
+            if (event.target !== updatePaymentModal) return;
+            closeUpdatePaymentModal();
         });
         createRazorpayLinkBtn?.addEventListener('click', createRazorpayPaymentLinkForActiveOrder);
         openRazorpayLinkBtn?.addEventListener('click', function() {
