@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Cormorant+Garamond:wght@600;700&display=swap" rel="stylesheet">
 
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=3">
-    <link rel="shortcut icon" href="/favicon.ico?v=3">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=4">
+    <link rel="shortcut icon" href="/favicon.ico?v=4">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="app-shell bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -625,6 +625,10 @@
                 <button id="closeUpdatePaymentModalBtn" type="button" class="update-payment-close">&times;</button>
             </div>
             <div class="update-payment-body">
+                <div class="update-payment-summary">
+                    <span>Current Status</span>
+                    <strong id="updatePaymentCurrentStatus">Payment Pending</strong>
+                </div>
                 <label>
                     <span>Payment Status</span>
                     <select id="updatePaymentStatus">
@@ -651,6 +655,7 @@
                     <span>Payment Note</span>
                     <textarea id="updatePaymentNote" rows="3" placeholder="Optional note"></textarea>
                 </label>
+                <p class="update-payment-hint">Use this when payment is received outside Razorpay or when the client has made a partial payment.</p>
             </div>
             <div class="update-payment-actions">
                 <button id="cancelUpdatePaymentBtn" type="button" class="payment-link-secondary">Close</button>

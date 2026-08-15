@@ -169,6 +169,7 @@ lucide.createIcons();
         const updatePaymentCurrencyInput = document.getElementById('updatePaymentCurrency');
         const updatePaymentAmountInput = document.getElementById('updatePaymentAmount');
         const updatePaymentNoteInput = document.getElementById('updatePaymentNote');
+        const updatePaymentCurrentStatus = document.getElementById('updatePaymentCurrentStatus');
         const openAttachmentPageBtn = document.getElementById('openAttachmentPageBtn');
         const openManageExpertPageBtn = document.getElementById('openManageExpertPageBtn');
         const openRecordTransactionBtn = document.getElementById('openRecordTransactionBtn');
@@ -270,6 +271,7 @@ lucide.createIcons();
         enforceStaticCrmUrl();
         window.addEventListener('click', () => setTimeout(enforceStaticCrmUrl, 0), true);
         window.addEventListener('popstate', enforceStaticCrmUrl);
+        window.addEventListener('hashchange', enforceStaticCrmUrl);
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
@@ -3391,7 +3393,7 @@ lucide.createIcons();
                 if (!history.length) {
                     odPaymentLinkHistoryList.innerHTML = '<p class="payment-link-history-empty">No Razorpay link generated yet.</p>';
                 } else {
-                    const rowsHtml = history.map((row) => {
+                    const rowsHtml = history.map((row, index) => {
                         const paymentStatus = row.receivedStatus === 'complete'
                             ? 'paid'
                             : row.receivedStatus === 'partial'
@@ -3418,35 +3420,42 @@ lucide.createIcons();
                                     ? 'is-expired'
                                     : 'is-created';
                         const dateText = formatDateTimeForCard(row.createdAt || row.updatedAt) || '-';
+                        const updatedText = formatDateTimeForCard(row.updatedAt || '') || '-';
                         const methodText = (row.methods && row.methods.length ? row.methods : getSelectedPaymentMethods())
                             .map(getPaymentMethodLabel)
-                            .join('   ');
+                            .join(', ');
                         const safeUrl = escapeHtml(row.url || '');
+                        const linkId = String(row.id || row.paymentLinkId || '').trim();
                         return `
-                            <div class="payment-link-history-row">
-                                <span class="payment-history-expand" aria-hidden="true">&#8964;</span>
-                                <div>
-                                    <strong>${escapeHtml(dateText)}</strong>
+                            <article class="payment-history-card">
+                                <div class="payment-history-card-top">
+                                    <div class="payment-history-title">
+                                        <span class="payment-history-index">#${index + 1}</span>
+                                        <div>
+                                            <strong>${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
+                                            <small>${escapeHtml(dateText)}</small>
+                                        </div>
+                                    </div>
+                                    <div class="payment-history-status-stack">
+                                        <span class="payment-history-status ${paymentStatusClass}">${escapeHtml(paymentStatus)}</span>
+                                        <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
+                                    </div>
                                 </div>
-                                <div class="payment-link-history-methods">${escapeHtml(methodText || '-')}</div>
-                                <strong>${escapeHtml(formatPaymentAmount(row.currency, row.amount))}</strong>
-                                <span class="payment-history-status ${paymentStatusClass}">${escapeHtml(paymentStatus)}</span>
-                                <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
-                                ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}" title="Open payment link" aria-label="Open payment link"><i data-lucide="external-link" class="w-4 h-4"></i></button>` : '<span class="payment-link-history-muted">No link</span>'}
-                            </div>
+                                <div class="payment-history-detail-grid">
+                                    <div><span>Methods</span><strong>${escapeHtml(methodText || '-')}</strong></div>
+                                    <div><span>Amount Paid</span><strong>${escapeHtml(formatPaymentAmount(row.currency, row.amountPaid || '0'))}</strong></div>
+                                    <div><span>Link ID</span><strong>${escapeHtml(linkId || '-')}</strong></div>
+                                    <div><span>Updated</span><strong>${escapeHtml(updatedText)}</strong></div>
+                                </div>
+                                <div class="payment-history-link-row">
+                                    <span>${row.url ? escapeHtml(row.url) : 'No link available'}</span>
+                                    ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}" title="Open payment link" aria-label="Open payment link"><i data-lucide="external-link" class="w-4 h-4"></i></button>` : '<span class="payment-link-history-muted">No link</span>'}
+                                </div>
+                            </article>
                         `;
                     }).join('');
                     odPaymentLinkHistoryList.innerHTML = `
-                        <div class="payment-link-history-table">
-                            <div class="payment-link-history-head">
-                                <span></span>
-                                <span>Created</span>
-                                <span>Methods</span>
-                                <span>Amount</span>
-                                <span>Payment Status</span>
-                                <span>Link Status</span>
-                                <span>Link</span>
-                            </div>
+                        <div class="payment-history-cards">
                             ${rowsHtml}
                         </div>
                     `;
@@ -3473,6 +3482,19 @@ lucide.createIcons();
             const baseAmount = activeOrderCard.querySelector('.order-amount')?.textContent?.trim() || '';
             if (updatePaymentMeta) {
                 updatePaymentMeta.textContent = `Order #${identity.orderId || '-'} | Due ${baseAmount || '-'}`;
+            }
+            if (updatePaymentCurrentStatus) {
+                const state = getPaymentLinkState(activeOrderCard);
+                const displayStatus = activeOrderCard.dataset.paymentStatusOverride === 'complete'
+                    ? 'Full Payment'
+                    : activeOrderCard.dataset.paymentStatusOverride === 'partial'
+                        ? 'Partial Paid'
+                        : state.receivedStatus === 'complete'
+                            ? 'Full Payment'
+                            : state.receivedStatus === 'partial'
+                                ? 'Partial Paid'
+                                : 'Payment Pending';
+                updatePaymentCurrentStatus.textContent = displayStatus;
             }
             if (updatePaymentStatusInput) updatePaymentStatusInput.value = activeOrderCard.dataset.paymentStatusOverride || 'partial';
             if (updatePaymentCurrencyInput) updatePaymentCurrencyInput.value = activeOrderCard.dataset.clientPaidCurrency || getPaymentLinkAmountFromForm().currency || 'INR';
