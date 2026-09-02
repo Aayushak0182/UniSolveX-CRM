@@ -7799,7 +7799,7 @@ lucide.createIcons();
         if (chatInput) {
             chatInput.addEventListener('input', function() {
                 this.style.height = 'auto';
-                this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+                this.style.height = Math.min(this.scrollHeight, 88) + 'px';
             });
             chatInput.addEventListener('keydown', function(event) {
                 if (event.key !== 'Enter' || event.shiftKey) return;

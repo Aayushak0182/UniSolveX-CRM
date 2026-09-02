@@ -142,7 +142,7 @@
         </aside>
 
         <main class="chat-panel flex-1 min-w-0 flex flex-col bg-white">
-            <div id="chatHeader" class="chat-header p-3 border-b bg-gray-50">
+            <div id="chatHeader" class="chat-header border-b bg-gray-50">
                 <div class="chat-header-bar">
                     <div class="chat-header-profile">
                         <div id="chatHeaderAvatar" class="chat-header-avatar">?</div>
@@ -156,10 +156,10 @@
                     </div>
                     <div class="chat-header-actions">
                         <button id="createTaskBtn" class="header-icon-action bg-indigo-600 text-white hover:bg-indigo-700 shadow-md" title="Create Task Card" aria-label="Create Task Card">
-                            <i data-lucide="clipboard-plus" class="w-5 h-5"></i>
+                            <i data-lucide="clipboard-plus" class="w-4 h-4"></i>
                         </button>
                         <button id="whatsappCallBtn" class="header-icon-action bg-emerald-600 text-white hover:bg-emerald-700 shadow-md" title="WhatsApp Call" aria-label="WhatsApp Call">
-                            <i data-lucide="phone-call" class="w-5 h-5"></i>
+                            <i data-lucide="phone-call" class="w-4 h-4"></i>
                         </button>
                     </div>
                 </div>
@@ -169,7 +169,7 @@
                 <div class="chat-empty-state" aria-hidden="true"></div>
             </div>
 
-            <div class="chat-composer-shell p-4 border-t bg-white">
+            <div class="chat-composer-shell border-t bg-white">
                 <div id="chatReplyPreview" class="mb-3 hidden items-start justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
                     <div class="min-w-0">
                         <p class="font-semibold">Replying to</p>
@@ -191,9 +191,9 @@
                 <div id="chatComposerAttachments" class="mb-3 hidden flex flex-wrap gap-2"></div>
                 <div id="chatAiModeHint" class="chat-ai-mode-hint hidden">Chat assigned to AI</div>
                 <div id="chatAssignmentHint" class="chat-ai-mode-hint hidden"></div>
-                <div class="chat-composer-bar flex items-center bg-gray-50 p-2 rounded-xl border">
+                <div class="chat-composer-bar flex items-center bg-gray-50 rounded-xl border">
                     <input id="chatFileInput" type="file" class="hidden" multiple>
-                    <textarea id="chatInput" rows="2" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2 resize-none"></textarea>
+                    <textarea id="chatInput" rows="1" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2 resize-none"></textarea>
                     <div class="chat-composer-actions flex items-center">
                         <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
                             <i data-lucide="paperclip" class="w-5 h-5"></i>

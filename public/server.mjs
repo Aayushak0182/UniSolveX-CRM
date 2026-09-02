@@ -12,7 +12,7 @@ const appSecret = process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET
 const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
 const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const whatsappGraphApiVersion = process.env.WHATSAPP_GRAPH_API_VERSION || 'v22.0';
-const whatsappCallingEnabled = String(process.env.WHATSAPP_CALLING_ENABLED || '').trim().toLowerCase() === 'true';
+const whatsappCallingEnabled = String(process.env.WHATSAPP_CALLING_ENABLED || 'true').trim().toLowerCase() !== 'false';
 const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME || '';
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
