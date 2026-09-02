@@ -2956,7 +2956,7 @@ html[data-theme="dark"] .chat-empty-state {
 .chat-composer-bar {
   gap: 0.5rem;
   align-items: flex-end !important;
-  padding: 0.45rem 0.5rem !important;
+  padding: 0.3rem 0.4rem !important;
 }
 
 .header-icon-action {
@@ -3017,19 +3017,19 @@ html[data-theme="dark"] .chat-empty-state {
 
 #chatInput {
   min-width: 0;
-  min-height: 30px;
-  max-height: 88px;
+  min-height: 26px;
+  max-height: 50px;
   line-height: 1.35;
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  padding-top: 0.35rem !important;
-  padding-bottom: 0.35rem !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
 }
 
 .chat-composer-shell {
-  padding: 0.45rem 0.75rem !important;
+  padding: 0.3rem 0.5rem !important;
 }
 
 .chat-bubble-admin,
@@ -3052,15 +3052,16 @@ html[data-theme="dark"] .chat-empty-state {
 }
 
 .chat-note-label {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
   color: #b45309;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.1rem;
 }
 
 .chat-note-text {
   color: #78350f;
+  font-size: 13px;
 }
 
 #addNoteModeBtn.is-active,
