@@ -40,6 +40,14 @@
                         <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
                         <span>Monthly Data</span>
                     </button>
+                    <button id="navCallLogsBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="list-phone" class="w-4 h-4"></i>
+                        <span>Call Logs</span>
+                    </button>
+                    <button id="navRegisterAgentBtn" type="button" class="admin-quick-menu-item">
+                        <i data-lucide="user-plus" class="w-4 h-4"></i>
+                        <span>Register Agent</span>
+                    </button>
                 </div>
             </div>
             <div class="brand-mark" aria-hidden="true">
@@ -57,7 +65,7 @@
                 <div id="whatsappLastEvent" class="text-[10px] text-gray-400 whitespace-nowrap">Last webhook: -</div>
             </div>
             <span id="agentNameDisplay" class="text-sm font-medium text-gray-600">Agent: </span>
-            <button id="assignActiveChatAgentBtn" type="button" class="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed">
+            <button id="assignActiveChatAgentBtn" type="button" class="hidden px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed">
                 Assign Agent
             </button>
             <div id="agentInitialDisplay" class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold"></div>
@@ -147,8 +155,11 @@
                         <p id="chatWindowTimer" class="text-[11px] font-mono font-medium text-red-600">EXPIRED</p>
                     </div>
                     <div class="chat-header-actions">
-                        <button id="createTaskBtn" class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-md">
-                            <i data-lucide="plus-circle" class="w-4 h-4"></i> Create Task Card
+                        <button id="createTaskBtn" class="header-icon-action bg-indigo-600 text-white hover:bg-indigo-700 shadow-md" title="Create Task Card" aria-label="Create Task Card">
+                            <i data-lucide="clipboard-plus" class="w-5 h-5"></i>
+                        </button>
+                        <button id="whatsappCallBtn" class="header-icon-action bg-emerald-600 text-white hover:bg-emerald-700 shadow-md" title="WhatsApp Call" aria-label="WhatsApp Call">
+                            <i data-lucide="phone-call" class="w-5 h-5"></i>
                         </button>
                     </div>
                 </div>
@@ -182,10 +193,13 @@
                 <div id="chatAssignmentHint" class="chat-ai-mode-hint hidden"></div>
                 <div class="chat-composer-bar flex items-center bg-gray-50 p-2 rounded-xl border">
                     <input id="chatFileInput" type="file" class="hidden" multiple>
-                    <input id="chatInput" type="text" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2">
+                    <textarea id="chatInput" rows="2" placeholder="Type message here..." class="flex-1 bg-transparent border-none focus:outline-none text-sm px-2 resize-none"></textarea>
                     <div class="chat-composer-actions flex items-center">
                         <button id="attachFileBtn" class="p-2 text-gray-500 hover:bg-gray-200 rounded-full" title="Attach File">
                             <i data-lucide="paperclip" class="w-5 h-5"></i>
+                        </button>
+                        <button id="addNoteModeBtn" class="p-2 text-amber-600 hover:bg-amber-50 rounded-full" title="Add internal note">
+                            <i data-lucide="sticky-note" class="w-5 h-5"></i>
                         </button>
                         <button id="aiAssistBtn" class="p-2 text-sky-600 hover:bg-sky-50 rounded-full" title="Transfer this chat to AI">
                             <i data-lucide="bot" class="w-5 h-5"></i>
@@ -368,6 +382,48 @@
         </div>
     </div>
 
+    <div id="registerAgentModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[420px] max-w-[94vw] p-6">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">Register Agent</h3>
+                    <p class="text-xs text-gray-500">Create CRM login access for a new agent.</p>
+                </div>
+                <button id="closeRegisterAgentModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label for="registerAgentEmail" class="text-xs font-bold uppercase text-gray-500">Agent Email</label>
+                    <input id="registerAgentEmail" type="email" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="agent@example.com">
+                </div>
+                <div>
+                    <label for="registerAgentPassword" class="text-xs font-bold uppercase text-gray-500">Password</label>
+                    <input id="registerAgentPassword" type="password" class="mt-1 w-full rounded-md border p-2 text-sm" placeholder="Minimum 6 characters">
+                </div>
+                <p id="registerAgentStatus" class="hidden rounded-md px-3 py-2 text-xs"></p>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button id="cancelRegisterAgentBtn" type="button" class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button id="saveRegisterAgentBtn" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Create Agent</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="whatsappCallPopup" class="whatsapp-call-popup hidden">
+        <div class="call-popup-top">
+            <div class="call-popup-icon"><i data-lucide="phone-call" class="w-5 h-5"></i></div>
+            <div class="min-w-0">
+                <p id="callPopupTitle" class="call-popup-title">WhatsApp Call</p>
+                <p id="callPopupMeta" class="call-popup-meta">Number hidden</p>
+            </div>
+        </div>
+        <p id="callPopupStatus" class="call-popup-status">Ringing...</p>
+        <div class="call-popup-actions">
+            <button id="closeCallPopupBtn" type="button">Close</button>
+            <button id="endCallPopupBtn" type="button">End Call</button>
+        </div>
+    </div>
+
     <div id="monthlyDataModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-xl shadow-2xl w-[1100px] max-w-[96vw] max-h-[88vh] p-6 flex flex-col">
             <div class="mb-4 flex items-start justify-between gap-3">
@@ -382,6 +438,19 @@
                 <input id="monthlyDataMonthModal" type="month" class="monthly-data-month-input" aria-label="Monthly data month selector">
             </div>
             <div id="monthlyDataModalContent" class="mt-4 flex-1 overflow-y-auto custom-scrollbar"></div>
+        </div>
+    </div>
+
+    <div id="callLogsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-[760px] max-w-[96vw] max-h-[86vh] p-6 flex flex-col">
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <h3 class="text-lg font-bold">WhatsApp Call Logs</h3>
+                    <p class="text-xs text-gray-500">Internal calling history. Client number stays hidden on screen.</p>
+                </div>
+                <button id="closeCallLogsModalBtn" type="button" class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+            </div>
+            <div id="callLogsList" class="call-logs-list flex-1 overflow-y-auto custom-scrollbar"></div>
         </div>
     </div>
 

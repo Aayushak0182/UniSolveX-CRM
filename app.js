@@ -25,6 +25,8 @@ lucide.createIcons();
         const navExportExpertsBtn = document.getElementById('navExportExpertsBtn');
         const navImportExpertsBtn = document.getElementById('navImportExpertsBtn');
         const navMonthlyDataBtn = document.getElementById('navMonthlyDataBtn');
+        const navCallLogsBtn = document.getElementById('navCallLogsBtn');
+        const navRegisterAgentBtn = document.getElementById('navRegisterAgentBtn');
         const importExpertsFileInput = document.getElementById('importExpertsFileInput');
         if (!hasValidAuthSession || !storedAgentName) {
             localStorage.removeItem('crmAuthSession');
@@ -37,7 +39,7 @@ lucide.createIcons();
         const adminServerStatusPanel = document.getElementById('adminServerStatusPanel');
         const AGENT_ROSTER_STORAGE_KEY = 'unisolvex_agent_roster_v1';
         const ACTIVE_AGENT_NAME_STORAGE_KEY = 'unisolvex_active_agent_name_v1';
-        let agentName = String(localStorage.getItem(ACTIVE_AGENT_NAME_STORAGE_KEY) || '').trim() || storedAgentName || 'Aayush';
+        let agentName = storedAgentName || deriveAgentNameFromEmail(storedAgentEmail) || 'Agent';
         const agentEmail = storedAgentEmail;
         if (adminServerStatusPanel && storedAgentRole !== 'admin') {
             adminServerStatusPanel.classList.add('hidden');
@@ -121,6 +123,24 @@ lucide.createIcons();
         const taskSessionDuration = document.getElementById('taskSessionDuration');
         const chatMessages = document.getElementById('chatMessages');
         const chatInput = document.getElementById('chatInput');
+        const addNoteModeBtn = document.getElementById('addNoteModeBtn');
+        const whatsappCallBtn = document.getElementById('whatsappCallBtn');
+        const whatsappCallPopup = document.getElementById('whatsappCallPopup');
+        const callPopupTitle = document.getElementById('callPopupTitle');
+        const callPopupMeta = document.getElementById('callPopupMeta');
+        const callPopupStatus = document.getElementById('callPopupStatus');
+        const closeCallPopupBtn = document.getElementById('closeCallPopupBtn');
+        const endCallPopupBtn = document.getElementById('endCallPopupBtn');
+        const registerAgentModal = document.getElementById('registerAgentModal');
+        const registerAgentEmailInput = document.getElementById('registerAgentEmail');
+        const registerAgentPasswordInput = document.getElementById('registerAgentPassword');
+        const registerAgentStatus = document.getElementById('registerAgentStatus');
+        const closeRegisterAgentModalBtn = document.getElementById('closeRegisterAgentModalBtn');
+        const cancelRegisterAgentBtn = document.getElementById('cancelRegisterAgentBtn');
+        const saveRegisterAgentBtn = document.getElementById('saveRegisterAgentBtn');
+        const callLogsModal = document.getElementById('callLogsModal');
+        const callLogsList = document.getElementById('callLogsList');
+        const closeCallLogsModalBtn = document.getElementById('closeCallLogsModalBtn');
         const chatFileInput = document.getElementById('chatFileInput');
         const odActualDeadlineInput = document.getElementById('odActualDeadline');
         const odExpertDeadlineInput = document.getElementById('odExpertDeadline');
@@ -217,6 +237,7 @@ lucide.createIcons();
         const aiAssistBtn = document.getElementById('aiAssistBtn');
         document.getElementById('agentNameDisplay').textContent = 'Agent: ' + agentName;
         document.getElementById('agentInitialDisplay').textContent = agentName.charAt(0).toUpperCase();
+        assignActiveChatAgentBtn?.classList.add('hidden');
         let activeOrderCard = null;
         let activeNotifyOrderCard = null;
         let activeWhatsappWaId = '';
@@ -304,6 +325,12 @@ lucide.createIcons();
         let whatsappSendInFlight = false;
         let archivedInboxMode = false;
         let whatsappTextSendProcessing = false;
+        let noteModeActive = false;
+        let activeCallLogId = '';
+        let activeWhatsappCallId = '';
+        let activeWhatsappCallPeer = null;
+        let activeWhatsappCallStream = null;
+        let remoteWhatsappCallAudio = null;
         const whatsappTextSendQueue = [];
         const forwardSelectionIds = new Set();
         let activeOrderTab = 'mine';
@@ -348,6 +375,8 @@ lucide.createIcons();
             manualContacts: [],
             experts: [],
             agentRoster: [],
+            agentNotesByContact: {},
+            whatsappCallLogs: [],
             whatsappContactIdMap: {},
             whatsappReadState: {},
             whatsappContactIdSequence: 100100,
@@ -380,6 +409,11 @@ lucide.createIcons();
 
         function normalizeAgentName(value) {
             return String(value || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function deriveAgentNameFromEmail(email) {
+            const localPart = String(email || '').split('@')[0] || '';
+            return normalizeAgentName(localPart.replace(/[._-]+/g, ' '));
         }
 
         function getAgentKey(value) {
@@ -486,6 +520,299 @@ lucide.createIcons();
             whatsappLastEventEl.textContent = text || '';
         }
 
+        function getAgentNotesForContact(waId) {
+            const normalizedWaId = normalizeWaId(waId);
+            const map = cloudCrmState.agentNotesByContact && typeof cloudCrmState.agentNotesByContact === 'object'
+                ? cloudCrmState.agentNotesByContact
+                : {};
+            return Array.isArray(map[normalizedWaId]) ? map[normalizedWaId] : [];
+        }
+
+        function addInternalNoteToContact(waId, text) {
+            const normalizedWaId = normalizeWaId(waId);
+            const noteText = String(text || '').trim();
+            if (!normalizedWaId || !noteText) return null;
+            if (!cloudCrmState.agentNotesByContact || typeof cloudCrmState.agentNotesByContact !== 'object') {
+                cloudCrmState.agentNotesByContact = {};
+            }
+            const note = {
+                id: makeTempMessageId('note'),
+                text: noteText,
+                timestamp: new Date().toISOString(),
+                direction: 'internal',
+                senderType: 'note',
+                agent: agentName,
+                agentEmail
+            };
+            cloudCrmState.agentNotesByContact[normalizedWaId] = [
+                ...getAgentNotesForContact(normalizedWaId),
+                note
+            ].slice(-200);
+            scheduleCrmStateSave();
+            return note;
+        }
+
+        function setNoteMode(active) {
+            noteModeActive = Boolean(active);
+            addNoteModeBtn?.classList.toggle('is-active', noteModeActive);
+            document.querySelector('.chat-composer-bar')?.classList.toggle('is-note-mode', noteModeActive);
+            if (chatInput) {
+                chatInput.placeholder = noteModeActive ? 'Add internal agent note...' : (chatInput.dataset.defaultPlaceholder || 'Type message here...');
+            }
+            const label = sendBtn?.querySelector('span');
+            if (label) label.textContent = noteModeActive ? 'Add Notes' : 'Send';
+        }
+
+        function maskPhoneNumber(value) {
+            const digits = normalizeWaId(value);
+            if (!digits) return 'Number hidden';
+            return `Number hidden (**${digits.slice(-2)})`;
+        }
+
+        function recordWhatsappCall(waId, status) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return null;
+            if (!Array.isArray(cloudCrmState.whatsappCallLogs)) cloudCrmState.whatsappCallLogs = [];
+            const contactItem = contactList?.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            const log = {
+                id: makeTempMessageId('call'),
+                callId: '',
+                waId: normalizedWaId,
+                clientId: String(contactItem?.dataset?.contactId || '').trim(),
+                clientName: contactItem?.dataset?.profileName || contactItem?.querySelector('.contact-name')?.textContent?.trim() || '',
+                status: String(status || 'ringing').trim(),
+                agent: agentName,
+                agentEmail,
+                timestamp: new Date().toISOString()
+            };
+            cloudCrmState.whatsappCallLogs = [log, ...cloudCrmState.whatsappCallLogs].slice(0, 500);
+            scheduleCrmStateSave();
+            return log;
+        }
+
+        function updateLatestCallStatus(status, callId = '') {
+            if (!activeCallLogId || !Array.isArray(cloudCrmState.whatsappCallLogs)) return;
+            const row = cloudCrmState.whatsappCallLogs.find((entry) => entry.id === activeCallLogId);
+            if (!row) return;
+            row.status = status;
+            if (callId) row.callId = callId;
+            row.updatedAt = new Date().toISOString();
+            scheduleCrmStateSave();
+        }
+
+        function setCallPopupStatusText(text, tone = 'info') {
+            if (!callPopupStatus) return;
+            callPopupStatus.textContent = text || '';
+            callPopupStatus.dataset.tone = tone;
+        }
+
+        function getOrCreateRemoteCallAudio() {
+            if (remoteWhatsappCallAudio) return remoteWhatsappCallAudio;
+            remoteWhatsappCallAudio = document.createElement('audio');
+            remoteWhatsappCallAudio.autoplay = true;
+            remoteWhatsappCallAudio.playsInline = true;
+            remoteWhatsappCallAudio.className = 'hidden';
+            document.body.appendChild(remoteWhatsappCallAudio);
+            return remoteWhatsappCallAudio;
+        }
+
+        function cleanupWhatsappCall() {
+            try {
+                activeWhatsappCallPeer?.close();
+            } catch {}
+            activeWhatsappCallPeer = null;
+            if (activeWhatsappCallStream) {
+                activeWhatsappCallStream.getTracks().forEach((track) => track.stop());
+            }
+            activeWhatsappCallStream = null;
+            activeWhatsappCallId = '';
+        }
+
+        function isCallPermissionGranted(data) {
+            const raw = JSON.stringify(data || {}).toLowerCase();
+            return /accepted|granted|allow|allowed|true/.test(raw) && !/denied|expired|not_allowed|false/.test(raw);
+        }
+
+        async function requestWhatsappCallPermission(waId) {
+            const res = await whatsappFetch('/api/whatsapp/call-permission-request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ waId, agentName, agentEmail })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) throw new Error(data?.error || 'Call permission request failed');
+            return data;
+        }
+
+        async function startWhatsappCallingApiCall(waId) {
+            if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+                throw new Error('This browser does not support microphone WebRTC calling.');
+            }
+            activeWhatsappCallStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            const peer = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+            activeWhatsappCallPeer = peer;
+            activeWhatsappCallStream.getTracks().forEach((track) => peer.addTrack(track, activeWhatsappCallStream));
+            peer.ontrack = (event) => {
+                const [stream] = event.streams || [];
+                if (stream) getOrCreateRemoteCallAudio().srcObject = stream;
+            };
+            peer.onconnectionstatechange = () => {
+                const state = peer.connectionState || '';
+                if (!state) return;
+                setCallPopupStatusText(`Call ${state}...`, state === 'failed' ? 'error' : 'info');
+                updateLatestCallStatus(state, activeWhatsappCallId);
+            };
+            const offer = await peer.createOffer({ offerToReceiveAudio: true });
+            await peer.setLocalDescription(offer);
+            const res = await whatsappFetch('/api/whatsapp/call/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    waId,
+                    sdp: offer.sdp,
+                    sdpType: offer.type || 'offer',
+                    agentName,
+                    agentEmail
+                })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to start WhatsApp call');
+            activeWhatsappCallId = String(data.callId || '').trim();
+            updateLatestCallStatus('calling', activeWhatsappCallId);
+            return data;
+        }
+
+        async function applyWhatsappCallEvent(payload = {}) {
+            if (!payload || typeof payload !== 'object') return;
+            const callId = String(payload.callId || payload.id || '').trim();
+            if (callId && activeWhatsappCallId && callId !== activeWhatsappCallId) return;
+            const status = String(payload.status || '').trim() || 'call update';
+            updateLatestCallStatus(status, callId);
+            setCallPopupStatusText(`Call ${status}`, /failed|reject|terminate|busy|no_answer|missed/i.test(status) ? 'error' : 'info');
+            if (payload.sdp && activeWhatsappCallPeer && !activeWhatsappCallPeer.currentRemoteDescription) {
+                try {
+                    await activeWhatsappCallPeer.setRemoteDescription({
+                        type: String(payload.sdpType || 'answer').toLowerCase() === 'offer' ? 'offer' : 'answer',
+                        sdp: String(payload.sdp || '')
+                    });
+                    setCallPopupStatusText('Call connected...', 'success');
+                } catch (err) {
+                    console.warn('Failed to apply WhatsApp call SDP answer:', err);
+                }
+            }
+            if (/terminate|ended|reject|failed|busy|no_answer|missed/i.test(status)) {
+                cleanupWhatsappCall();
+            }
+            if (!callLogsModal?.classList.contains('hidden')) renderCallLogsList();
+        }
+
+        async function openWhatsappCallPopup() {
+            if (!activeWhatsappWaId) {
+                alert('Select a WhatsApp contact first.');
+                return;
+            }
+            const waId = normalizeWaId(activeWhatsappWaId);
+            const contactItem = contactList?.querySelector('.contact-item[data-wa-id="' + waId + '"]');
+            const clientName = contactItem?.dataset?.profileName || contactItem?.querySelector('.contact-name')?.textContent?.trim() || 'Client';
+            const clientId = String(contactItem?.dataset?.contactId || '').trim();
+            const log = recordWhatsappCall(waId, 'ringing');
+            activeCallLogId = log?.id || '';
+            if (callPopupTitle) callPopupTitle.textContent = clientName;
+            if (callPopupMeta) callPopupMeta.textContent = `${clientId ? `Client ID ${clientId} | ` : ''}${maskPhoneNumber(waId)}`;
+            setCallPopupStatusText('Checking WhatsApp call permission...');
+            whatsappCallPopup?.classList.remove('hidden');
+            lucide.createIcons();
+            try {
+                const permissionRes = await whatsappFetch('/api/whatsapp/call-permissions?waId=' + encodeURIComponent(waId));
+                const permissionData = await permissionRes.json().catch(() => ({}));
+                if (!permissionRes.ok) throw new Error(permissionData?.error || 'Could not check call permission');
+                if (!isCallPermissionGranted(permissionData)) {
+                    await requestWhatsappCallPermission(waId);
+                    updateLatestCallStatus('permission_requested');
+                    setCallPopupStatusText('Call permission request sent. Start call after client accepts.', 'info');
+                    return;
+                }
+                setCallPopupStatusText('Starting WhatsApp call...');
+                await startWhatsappCallingApiCall(waId);
+                setCallPopupStatusText('Ringing on WhatsApp...', 'success');
+            } catch (err) {
+                cleanupWhatsappCall();
+                updateLatestCallStatus('failed');
+                setCallPopupStatusText(err?.message || 'WhatsApp call failed', 'error');
+            }
+        }
+
+        function renderCallLogsList() {
+            if (!callLogsList) return;
+            const logs = Array.isArray(cloudCrmState.whatsappCallLogs) ? cloudCrmState.whatsappCallLogs : [];
+            if (!logs.length) {
+                callLogsList.innerHTML = '<div class="call-log-empty">No WhatsApp calls logged yet.</div>';
+                return;
+            }
+            callLogsList.innerHTML = logs.map((log) => {
+                const when = formatDateTimeForCard(log.timestamp || log.updatedAt || '') || 'Just now';
+                return `
+                    <div class="call-log-row">
+                        <div class="call-log-main">
+                            <strong>${escapeHtml(log.clientName || 'Client')}</strong>
+                            <span>${escapeHtml(log.clientId ? `Client ID ${log.clientId}` : 'Client ID -')}</span>
+                        </div>
+                        <div class="call-log-meta">
+                            <span>${escapeHtml(log.status || 'ringing')}</span>
+                            <span>${escapeHtml(log.agent || 'Agent')}</span>
+                            <span>${escapeHtml(when)}</span>
+                            <span>Number hidden</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function openCallLogsModal() {
+            renderCallLogsList();
+            callLogsModal?.classList.remove('hidden');
+            document.body.classList.add('modal-open');
+        }
+
+        function closeCallLogsModal() {
+            callLogsModal?.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+        }
+
+        function ensureCopyIdButton(container, value) {
+            if (!container) return;
+            const copyValue = String(value || container.textContent || '').replace(/^ID:\s*/i, '').replace(/^#/, '').trim();
+            if (!copyValue) return;
+            container.classList.add('copyable-id');
+            let button = container.querySelector('.copy-id-btn');
+            if (!button) {
+                button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'copy-id-btn';
+                button.title = 'Copy ID';
+                button.setAttribute('aria-label', 'Copy ID');
+                button.innerHTML = '<i data-lucide="copy" class="w-3 h-3"></i>';
+                container.appendChild(button);
+            }
+            button.dataset.copyValue = copyValue;
+        }
+
+        function refreshCopyIdButtons(root = document) {
+            root.querySelectorAll?.('.contact-meta').forEach((el) => {
+                ensureCopyIdButton(el, String(el.textContent || '').replace(/^ID:\s*/i, '').trim());
+            });
+            root.querySelectorAll?.('.order-id').forEach((el) => {
+                ensureCopyIdButton(el, String(el.textContent || '').replace(/^#/, '').trim());
+            });
+            ['odSummaryOrderId', 'odSummaryClientId'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) ensureCopyIdButton(el, String(el.textContent || '').replace(/^#/, '').trim());
+            });
+            lucide.createIcons();
+        }
+
         function formatShortTime(ts) {
             const d = ts ? new Date(ts) : new Date();
             if (Number.isNaN(d.getTime())) return '';
@@ -533,6 +860,10 @@ lucide.createIcons();
         function mergeFetchOptions(baseUrl, options) {
             const nextOptions = { ...(options || {}) };
             const nextHeaders = { ...(options?.headers || {}) };
+            const authToken = String(localStorage.getItem('crmAuthToken') || '').trim();
+            if (authToken && !nextHeaders.Authorization) {
+                nextHeaders.Authorization = 'Bearer ' + authToken;
+            }
             if (shouldUseNgrokBypassHeader(baseUrl)) {
                 nextHeaders['ngrok-skip-browser-warning'] = 'true';
             }
@@ -706,6 +1037,8 @@ lucide.createIcons();
                 manualContacts: readManualContactsFromStorage(),
                 experts: readExpertsFromStorage(),
                 agentRoster: readAgentRosterFromStorage(),
+                agentNotesByContact: cloudCrmState.agentNotesByContact && typeof cloudCrmState.agentNotesByContact === 'object' ? cloudCrmState.agentNotesByContact : {},
+                whatsappCallLogs: Array.isArray(cloudCrmState.whatsappCallLogs) ? cloudCrmState.whatsappCallLogs : [],
                 whatsappContactIdMap: readWhatsappContactIdMapFromStorage(),
                 whatsappReadState: readWhatsappReadStateFromStorage(),
                 whatsappContactIdSequence: Number.isFinite(rawSequence) ? rawSequence : 100100,
@@ -722,9 +1055,11 @@ lucide.createIcons();
             const hasRazorpayPayments = state.razorpayPaymentsByOrder && Object.keys(state.razorpayPaymentsByOrder).length > 0;
             const hasManualContacts = Array.isArray(state.manualContacts) && state.manualContacts.length > 0;
             const hasExperts = Array.isArray(state.experts) && state.experts.length > 0;
+            const hasNotes = state.agentNotesByContact && Object.keys(state.agentNotesByContact).length > 0;
+            const hasCallLogs = Array.isArray(state.whatsappCallLogs) && state.whatsappCallLogs.length > 0;
             const hasContactMap = state.whatsappContactIdMap && Object.keys(state.whatsappContactIdMap).length > 0;
             const hasReadState = state.whatsappReadState && Object.keys(state.whatsappReadState).length > 0;
-            return Boolean(hasOrders || hasOrderAttachments || hasSuppressedAiCards || hasRazorpayPayments || hasManualContacts || hasExperts || hasContactMap || hasReadState);
+            return Boolean(hasOrders || hasOrderAttachments || hasSuppressedAiCards || hasRazorpayPayments || hasManualContacts || hasExperts || hasNotes || hasCallLogs || hasContactMap || hasReadState);
         }
 
         function hasMeaningfulLocalCrmState() {
@@ -786,6 +1121,7 @@ lucide.createIcons();
                 if (!Number.isFinite(suffix)) return;
                 orderSequenceByClient[cardClientId] = Math.max(orderSequenceByClient[cardClientId] || 1009, suffix);
             });
+            refreshCopyIdButtons(orderList);
             applyOrderSearchFilter();
         }
 
@@ -878,6 +1214,9 @@ lucide.createIcons();
                 Array.isArray(state.suppressedAiTaskCards) ||
                 (state.razorpayPaymentsByOrder && typeof state.razorpayPaymentsByOrder === 'object') ||
                 Array.isArray(state.manualContacts) ||
+                Array.isArray(state.experts) ||
+                (state.agentNotesByContact && typeof state.agentNotesByContact === 'object') ||
+                Array.isArray(state.whatsappCallLogs) ||
                 (state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object') ||
                 Number.isFinite(Number(state.whatsappContactIdSequence));
 
@@ -895,6 +1234,8 @@ lucide.createIcons();
             cloudCrmState.razorpayPaymentsByOrder = state.razorpayPaymentsByOrder && typeof state.razorpayPaymentsByOrder === 'object' ? state.razorpayPaymentsByOrder : {};
             cloudCrmState.manualContacts = Array.isArray(state.manualContacts) ? state.manualContacts : [];
             cloudCrmState.experts = Array.isArray(state.experts) ? state.experts : [];
+            cloudCrmState.agentNotesByContact = state.agentNotesByContact && typeof state.agentNotesByContact === 'object' ? state.agentNotesByContact : {};
+            cloudCrmState.whatsappCallLogs = Array.isArray(state.whatsappCallLogs) ? state.whatsappCallLogs : [];
             cloudCrmState.whatsappContactIdMap = state.whatsappContactIdMap && typeof state.whatsappContactIdMap === 'object' ? state.whatsappContactIdMap : {};
             cloudCrmState.whatsappReadState = state.whatsappReadState && typeof state.whatsappReadState === 'object' ? state.whatsappReadState : {};
             cloudCrmState.whatsappContactIdSequence = Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100;
@@ -906,7 +1247,7 @@ lucide.createIcons();
                 rehydrateOrderCardsFromDom();
             }
             applyRazorpayPaymentUpdates(cloudCrmState.razorpayPaymentsByOrder);
-            writeAgentRosterToStorage(Array.isArray(state.agentRoster) ? state.agentRoster : [], true);
+            writeAgentRosterToStorage([agentName], true);
             setWhatsappContactIdSequenceInStorage(
                 Number.isFinite(Number(state.whatsappContactIdSequence)) ? Number(state.whatsappContactIdSequence) : 100100,
                 true
@@ -915,7 +1256,7 @@ lucide.createIcons();
             experts = readExpertsFromStorage();
 
             restoreManualContactsFromStorage();
-            setCurrentAgentName(localStorage.getItem(ACTIVE_AGENT_NAME_STORAGE_KEY) || agentName, true);
+            setCurrentAgentName(storedAgentName || agentName, true);
             if (activeWhatsappWaId) {
                 updateChatAssignmentState(activeWhatsappWaId);
             }
@@ -1835,12 +2176,7 @@ lucide.createIcons();
         }
 
         function canCurrentAgentMessageContact(waId) {
-            const assigned = getAssignedAgentMetaByWaId(waId);
-            const currentKey = getAgentKey(agentName);
-            if (assigned.key) return assigned.key === currentKey;
-            if (assigned.name) return getAgentKey(assigned.name) === currentKey;
-            if (assigned.email) return assigned.email === agentEmail;
-            return false;
+            return Boolean(normalizeWaId(waId));
         }
 
         function syncContactAssignmentBadge(item) {
@@ -1857,11 +2193,8 @@ lucide.createIcons();
             const hasAnyContacts = contactList?.querySelectorAll('.contact-item').length > 0;
 
             if (assignActiveChatAgentBtn) {
-                assignActiveChatAgentBtn.disabled = !hasAnyContacts;
-                assignActiveChatAgentBtn.textContent = hasThread && isAssigned
-                        ? `Assigned: ${assigned.name || 'Agent'}`
-                        : 'Assign Agent';
-                assignActiveChatAgentBtn.title = hasAnyContacts ? 'Open agent assignment popup' : 'No chats available yet';
+                assignActiveChatAgentBtn.classList.add('hidden');
+                assignActiveChatAgentBtn.disabled = true;
             }
 
             if (chatAssignmentHintEl) {
@@ -1873,17 +2206,14 @@ lucide.createIcons();
                 if (!chatInput.dataset.defaultPlaceholder) {
                     chatInput.dataset.defaultPlaceholder = chatInput.getAttribute('placeholder') || 'Type message here...';
                 }
-                chatInput.readOnly = hasThread ? !canMessage : true;
-                chatInput.value = hasThread && !canMessage ? '' : chatInput.value;
+                chatInput.readOnly = hasThread ? false : true;
                 chatInput.setAttribute(
                     'placeholder',
                     !hasThread
                         ? 'Type message here...'
-                        : canMessage
-                            ? (chatInput.dataset.defaultPlaceholder || 'Type message here...')
-                            : isAssigned
-                                ? `Assigned to ${assigned.name || 'another agent'}`
-                                : 'Assign this chat to start messaging'
+                        : noteModeActive
+                            ? 'Add internal agent note...'
+                            : (chatInput.dataset.defaultPlaceholder || 'Type message here...')
                 );
             }
 
@@ -3997,6 +4327,7 @@ lucide.createIcons();
             setText('odQuickExpertDeadline', expertDeadline);
             setText('odQuickOrderPayment', orderPayment);
             setText('odQuickComment', latestComment ? `${latestComment.agent || 'Agent'} - ${getOrderCommentPreview(latestComment.text || '', 56)}` : '-');
+            refreshCopyIdButtons(document.getElementById('orderDetailsModal'));
         }
 
         function getOrderRecordIdentity(card) {
@@ -5268,7 +5599,10 @@ lucide.createIcons();
                 updateChatWindowState('');
                 return;
             }
-            const messages = whatsappMessagesByContact[waId] || [];
+            const messages = [
+                ...(whatsappMessagesByContact[waId] || []),
+                ...getAgentNotesForContact(waId)
+            ].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
             chatMessages.classList.remove('is-empty-chat');
             chatMessages.innerHTML = '';
             if (!messages.length) {
@@ -5291,6 +5625,7 @@ lucide.createIcons();
                 if (messageDateKey) previousDateKey = messageDateKey;
                 const wrap = document.createElement('div');
                 const incoming = msg.direction === 'incoming';
+                const isInternalNote = msg.direction === 'internal' || String(msg.senderType || '').toLowerCase() === 'note';
                 const statusTick = incoming ? '' : getStatusTickHtml(msg.status, msg.errorReason);
                 const messageType = msg.messageType || 'text';
                 const isTemplateMessage = String(messageType).toLowerCase() === 'template';
@@ -5306,7 +5641,14 @@ lucide.createIcons();
                         </button>
                     `
                     : '';
-                const bubbleBody = isMediaMessageType(messageType)
+                const bubbleBody = isInternalNote
+                    ? `
+                        <div class="chat-note-body">
+                            <p class="chat-note-label">Internal Note - ${escapeHtml(msg.agent || 'Agent')}</p>
+                            <p class="chat-note-text">${escapeHtml(msg.text || '')}</p>
+                        </div>
+                    `
+                    : isMediaMessageType(messageType)
                     ? (messageType === 'image' && attachmentUrl
                         ? `
                             <div class="chat-bubble-file chat-bubble-media">
@@ -5383,10 +5725,12 @@ lucide.createIcons();
                             </div>
                         `
                     : escapeHtml(msg.text || '[Unsupported message type]');
-                const bubbleClass = (isTemplateMessage || isHandoffMessage)
+                const bubbleClass = isInternalNote
+                    ? 'chat-bubble-note p-3 shadow-sm text-sm'
+                    : (isTemplateMessage || isHandoffMessage)
                     ? 'chat-bubble-template p-2.5 shadow-sm text-sm text-gray-800'
                     : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800`;
-                wrap.className = 'flex flex-col ' + ((isTemplateMessage || isHandoffMessage) ? 'items-center' : (incoming ? 'items-start' : 'items-end'));
+                wrap.className = 'flex flex-col ' + ((isTemplateMessage || isHandoffMessage || isInternalNote) ? 'items-center' : (incoming ? 'items-start' : 'items-end'));
                 wrap.innerHTML = `
                         <div class="chat-message-row" data-message-id="${escapeHtml(msg.id || '')}" data-message-key="${escapeHtml(clientKey)}">
                         ${forwardMode ? `<input class="chat-forward-check" type="checkbox" data-forward-id="${escapeHtml(clientKey)}" ${forwardSelectionIds.has(clientKey) ? 'checked' : ''}>` : ''}
@@ -5506,7 +5850,6 @@ lucide.createIcons();
                         </div>
                     </div>
                     <div class="contact-card-menu hidden">
-                        <button type="button" class="contact-action-assign-agent">Assign to Agent</button>
                         ${isAdminUser ? '<button type="button" class="contact-action-delete text-red-600">Delete Contact</button>' : ''}
                         <button type="button" class="contact-action-pin">Pin chat</button>
                         <label class="contact-menu-label-wrap">
@@ -5590,6 +5933,7 @@ lucide.createIcons();
                 setContactUnreadCount(existing, getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []));
                 updateContactStateUI(existing);
             }
+            refreshCopyIdButtons(existing);
             return existing;
         }
 
@@ -5825,6 +6169,8 @@ lucide.createIcons();
                         upsertWhatsappMessage(data.payload || {});
                     } else if (data.type === 'whatsapp_message_status') {
                         applyWhatsappMessageStatusUpdate(data.payload || {});
+                    } else if (data.type === 'whatsapp_call_event') {
+                        void applyWhatsappCallEvent(data.payload || {});
                     }
                 } catch (err) {
                     console.error('Invalid WhatsApp socket payload:', err);
@@ -5947,6 +6293,122 @@ lucide.createIcons();
                 openMonthlyDataModal();
             });
         }
+
+        navCallLogsBtn?.addEventListener('click', () => {
+            if (!isAdminUser) return;
+            adminQuickMenu?.classList.add('hidden');
+            adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+            openCallLogsModal();
+        });
+
+        closeCallLogsModalBtn?.addEventListener('click', closeCallLogsModal);
+        callLogsModal?.addEventListener('click', (event) => {
+            if (event.target === callLogsModal) closeCallLogsModal();
+        });
+
+        function setRegisterAgentStatus(message, tone = 'info') {
+            if (!registerAgentStatus) return;
+            registerAgentStatus.textContent = message || '';
+            registerAgentStatus.className = `rounded-md px-3 py-2 text-xs ${message ? '' : 'hidden'} ${tone === 'error' ? 'bg-red-50 text-red-700' : tone === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'}`;
+        }
+
+        function closeRegisterAgentModal() {
+            registerAgentModal?.classList.add('hidden');
+            document.body.classList.remove('modal-open');
+            setRegisterAgentStatus('');
+        }
+
+        navRegisterAgentBtn?.addEventListener('click', () => {
+            if (!isAdminUser) return;
+            adminQuickMenu?.classList.add('hidden');
+            adminQuickMenuBtn?.setAttribute('aria-expanded', 'false');
+            registerAgentEmailInput.value = '';
+            registerAgentPasswordInput.value = '';
+            setRegisterAgentStatus('');
+            registerAgentModal?.classList.remove('hidden');
+            document.body.classList.add('modal-open');
+        });
+
+        closeRegisterAgentModalBtn?.addEventListener('click', closeRegisterAgentModal);
+        cancelRegisterAgentBtn?.addEventListener('click', closeRegisterAgentModal);
+        registerAgentModal?.addEventListener('click', (event) => {
+            if (event.target === registerAgentModal) closeRegisterAgentModal();
+        });
+        saveRegisterAgentBtn?.addEventListener('click', async () => {
+            const email = String(registerAgentEmailInput?.value || '').trim().toLowerCase();
+            const password = String(registerAgentPasswordInput?.value || '').trim();
+            if (!email || !password) {
+                setRegisterAgentStatus('Enter email and password.', 'error');
+                return;
+            }
+            saveRegisterAgentBtn.disabled = true;
+            setRegisterAgentStatus('Creating agent login...', 'info');
+            try {
+                const res = await whatsappFetch('/api/auth/register-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data?.ok) throw new Error(data?.error || 'Agent registration failed');
+                setRegisterAgentStatus('Agent registered successfully.', 'success');
+                registerAgentPasswordInput.value = '';
+            } catch (err) {
+                setRegisterAgentStatus(err?.message || 'Agent registration failed.', 'error');
+            } finally {
+                saveRegisterAgentBtn.disabled = false;
+            }
+        });
+
+        addNoteModeBtn?.addEventListener('click', () => {
+            if (!activeWhatsappWaId) {
+                alert('Select a WhatsApp contact first.');
+                return;
+            }
+            setNoteMode(!noteModeActive);
+            chatInput?.focus();
+        });
+
+        whatsappCallBtn?.addEventListener('click', openWhatsappCallPopup);
+        closeCallPopupBtn?.addEventListener('click', () => whatsappCallPopup?.classList.add('hidden'));
+        endCallPopupBtn?.addEventListener('click', async () => {
+            const callId = activeWhatsappCallId;
+            updateLatestCallStatus('ended', callId);
+            if (callId) {
+                try {
+                    await whatsappFetch('/api/whatsapp/call/terminate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ callId })
+                    });
+                } catch (err) {
+                    console.warn('Failed to terminate WhatsApp call:', err);
+                }
+            }
+            cleanupWhatsappCall();
+            setCallPopupStatusText('Call ended');
+            setTimeout(() => whatsappCallPopup?.classList.add('hidden'), 700);
+        });
+
+        document.addEventListener('click', async (event) => {
+            const copyBtn = event.target.closest('.copy-id-btn');
+            if (!copyBtn) return;
+            event.stopPropagation();
+            const text = String(copyBtn.dataset.copyValue || copyBtn.previousElementSibling?.textContent || '').replace(/^#/, '').trim();
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                copyBtn.classList.add('is-copied');
+                setTimeout(() => copyBtn.classList.remove('is-copied'), 900);
+            } catch {
+                const tmp = document.createElement('textarea');
+                tmp.value = text;
+                document.body.appendChild(tmp);
+                tmp.select();
+                document.execCommand('copy');
+                tmp.remove();
+            }
+        });
 
         assignActiveChatAgentBtn?.addEventListener('click', async () => {
             if (!contactList?.querySelector('.contact-item')) return;
@@ -6277,6 +6739,7 @@ lucide.createIcons();
             `;
             card.querySelector('.order-deadline').dataset.baseValue = formatDateTimeForCard(actualDeadline || '');
             card.querySelector('.order-expert-deadline').dataset.baseValue = formatDateTimeForCard(expertDeadline || '');
+            refreshCopyIdButtons(card);
             syncOrderServiceTag(card);
             syncOrderPaymentIndicator(card);
             syncOrderExpertPaymentIndicator(card);
@@ -7261,6 +7724,14 @@ lucide.createIcons();
                 alert('Select a WhatsApp contact first.');
                 return;
             }
+            if (noteModeActive) {
+                if (!text) return;
+                addInternalNoteToContact(activeWhatsappWaId, text);
+                chatInput.value = '';
+                setNoteMode(false);
+                renderWhatsappMessages(activeWhatsappWaId);
+                return;
+            }
             if (!canCurrentAgentMessageContact(activeWhatsappWaId)) {
                 const assigned = getAssignedAgentMetaByWaId(activeWhatsappWaId);
                 alert(assigned.name ? ('This chat is assigned to ' + assigned.name + '.') : 'Assign this chat to yourself before sending messages.');
@@ -7326,6 +7797,10 @@ lucide.createIcons();
             }
         };
         if (chatInput) {
+            chatInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+            });
             chatInput.addEventListener('keydown', function(event) {
                 if (event.key !== 'Enter' || event.shiftKey) return;
                 event.preventDefault();

@@ -11,6 +11,8 @@ const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '';
 const appSecret = process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || '';
 const whatsappAccessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
 const whatsappPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+const whatsappGraphApiVersion = process.env.WHATSAPP_GRAPH_API_VERSION || 'v22.0';
+const whatsappCallingEnabled = String(process.env.WHATSAPP_CALLING_ENABLED || '').trim().toLowerCase() === 'true';
 const whatsappInitiationTemplateName = process.env.WHATSAPP_INIT_TEMPLATE_NAME || '';
 const whatsappInitiationTemplateLanguage = process.env.WHATSAPP_INIT_TEMPLATE_LANG || 'en_US';
 const whatsappInitiationTemplateParamOrder = process.env.WHATSAPP_INIT_TEMPLATE_PARAM_ORDER;
@@ -109,6 +111,8 @@ const crmState = {
     manualContacts: [],
     experts: [],
     agentRoster: [],
+    agentNotesByContact: {},
+    whatsappCallLogs: [],
     whatsappContactIdMap: {},
     whatsappReadState: {},
     razorpayPaymentsByOrder: {},
@@ -197,6 +201,12 @@ function resolveFirebaseAuthRole(email) {
     return firebaseAuthAgentEmails.has(normalizedEmail) ? 'agent' : '';
 }
 
+function resolveDecodedAuthRole(decoded) {
+    const claimRole = String(decoded?.role || '').trim().toLowerCase();
+    if (claimRole === 'admin' || claimRole === 'agent') return claimRole;
+    return resolveFirebaseAuthRole(decoded?.email || '');
+}
+
 function deriveNameFromEmail(email, fallbackDisplayName) {
     const displayName = String(fallbackDisplayName || '').trim();
     if (displayName) return displayName;
@@ -205,6 +215,31 @@ function deriveNameFromEmail(email, fallbackDisplayName) {
         .replace(/[._-]+/g, ' ')
         .replace(/\b\w/g, (char) => char.toUpperCase())
         .trim() || 'User';
+}
+
+async function requireAdminRequest(req, res) {
+    const authHeader = String(req.headers.authorization || '').trim();
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+        res.status(401).json({ ok: false, error: 'Admin session token is required' });
+        return null;
+    }
+    if (!initFirebasePersistence()) {
+        res.status(500).json({ ok: false, error: firebasePersistenceInitError || 'Firebase Admin is not configured on the backend' });
+        return null;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(token, true);
+        const email = String(decoded.email || '').trim().toLowerCase();
+        if (resolveDecodedAuthRole(decoded) !== 'admin') {
+            res.status(403).json({ ok: false, error: 'Only admin can register agents' });
+            return null;
+        }
+        return { decoded, email };
+    } catch (error) {
+        res.status(401).json({ ok: false, error: error?.message || 'Invalid admin session' });
+        return null;
+    }
 }
 
 function warnMissingFirebasePersistenceOnce() {
@@ -645,6 +680,47 @@ function normalizeCrmStatePayload(payload = {}) {
             .filter(Boolean)
             .filter((entry, index, array) => array.findIndex((item) => item.toLowerCase() === entry.toLowerCase()) === index)
         : crmState.agentRoster;
+    const nextAgentNotesByContact = payload.agentNotesByContact && typeof payload.agentNotesByContact === 'object'
+        ? Object.fromEntries(
+            Object.entries(payload.agentNotesByContact)
+                .map(([key, value]) => {
+                    const waId = normalizeWaId(key);
+                    if (!waId || !Array.isArray(value)) return null;
+                    return [waId, value
+                        .filter((note) => note && typeof note === 'object')
+                        .map((note) => ({
+                            id: String(note.id || '').trim(),
+                            text: String(note.text || '').trim(),
+                            timestamp: String(note.timestamp || '').trim(),
+                            direction: 'internal',
+                            senderType: 'note',
+                            agent: String(note.agent || '').trim(),
+                            agentEmail: String(note.agentEmail || '').trim().toLowerCase()
+                        }))
+                        .filter((note) => note.text)
+                        .slice(-200)];
+                })
+                .filter(Boolean)
+        )
+        : crmState.agentNotesByContact;
+    const nextWhatsappCallLogs = Array.isArray(payload.whatsappCallLogs)
+        ? payload.whatsappCallLogs
+            .filter((row) => row && typeof row === 'object')
+            .map((row) => ({
+                id: String(row.id || '').trim(),
+                callId: String(row.callId || row.call_id || row.id || '').trim(),
+                waId: normalizeWaId(row.waId || ''),
+                clientId: String(row.clientId || '').trim(),
+                clientName: String(row.clientName || '').trim(),
+                status: String(row.status || '').trim(),
+                agent: String(row.agent || '').trim(),
+                agentEmail: String(row.agentEmail || '').trim().toLowerCase(),
+                timestamp: String(row.timestamp || '').trim(),
+                updatedAt: String(row.updatedAt || '').trim()
+            }))
+            .filter((row) => row.waId && row.status)
+            .slice(0, 500)
+        : crmState.whatsappCallLogs;
     const nextContactIdMap = payload.whatsappContactIdMap && typeof payload.whatsappContactIdMap === 'object'
         ? Object.fromEntries(
             Object.entries(payload.whatsappContactIdMap)
@@ -755,6 +831,8 @@ function normalizeCrmStatePayload(payload = {}) {
         manualContacts: nextManualContacts,
         experts: nextExperts,
         agentRoster: nextAgentRoster,
+        agentNotesByContact: nextAgentNotesByContact,
+        whatsappCallLogs: nextWhatsappCallLogs,
         whatsappContactIdMap: nextContactIdMap,
         whatsappReadState: nextReadState,
         razorpayPaymentsByOrder: nextRazorpayPayments,
@@ -784,6 +862,8 @@ async function loadPersistedCrmState() {
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
+    crmState.agentNotesByContact = nextState.agentNotesByContact;
+    crmState.whatsappCallLogs = nextState.whatsappCallLogs;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.razorpayPaymentsByOrder = nextState.razorpayPaymentsByOrder;
@@ -828,6 +908,8 @@ async function persistCrmState(partialPayload = {}) {
     crmState.manualContacts = nextState.manualContacts;
     crmState.experts = nextState.experts;
     crmState.agentRoster = nextState.agentRoster;
+    crmState.agentNotesByContact = nextState.agentNotesByContact;
+    crmState.whatsappCallLogs = nextState.whatsappCallLogs;
     crmState.whatsappContactIdMap = nextState.whatsappContactIdMap;
     crmState.whatsappReadState = nextState.whatsappReadState;
     crmState.razorpayPaymentsByOrder = nextState.razorpayPaymentsByOrder;
@@ -842,6 +924,38 @@ async function persistCrmState(partialPayload = {}) {
     lastFirebaseWriteAt = new Date().toISOString();
     lastFirebaseWriteError = '';
     return true;
+}
+
+async function appendWhatsappCallLog(update = {}) {
+    const waId = normalizeWaId(update.waId || update.to || update.from || update.recipient_id || '');
+    const callId = String(update.callId || update.call_id || update.id || '').trim();
+    const status = String(update.status || update.event || 'ringing').trim().toLowerCase();
+    if (!waId && !callId) return null;
+    await ensureCrmStateLoaded(false);
+    const existingLogs = Array.isArray(crmState.whatsappCallLogs) ? crmState.whatsappCallLogs : [];
+    const existingIndex = callId
+        ? existingLogs.findIndex((row) => String(row.callId || row.id || '') === callId)
+        : -1;
+    const previous = existingIndex >= 0 ? existingLogs[existingIndex] : {};
+    const nextLog = {
+        ...previous,
+        id: String(previous.id || callId || crypto.randomUUID()),
+        callId: callId || String(previous.callId || ''),
+        waId: waId || normalizeWaId(previous.waId || ''),
+        clientId: String(update.clientId || previous.clientId || '').trim(),
+        clientName: String(update.clientName || previous.clientName || '').trim(),
+        status,
+        agent: String(update.agent || previous.agent || '').trim(),
+        agentEmail: String(update.agentEmail || previous.agentEmail || '').trim().toLowerCase(),
+        timestamp: String(previous.timestamp || update.timestamp || new Date().toISOString()),
+        updatedAt: new Date().toISOString(),
+        sdpAnswerReceived: Boolean(update.sdpAnswerReceived || previous.sdpAnswerReceived)
+    };
+    const nextLogs = existingIndex >= 0 ? [...existingLogs] : [nextLog, ...existingLogs];
+    if (existingIndex >= 0) nextLogs[existingIndex] = nextLog;
+    crmState.whatsappCallLogs = nextLogs.slice(0, 500);
+    await persistCrmState({ whatsappCallLogs: crmState.whatsappCallLogs });
+    return nextLog;
 }
 
 async function deletePersistedWhatsappThread(waId) {
@@ -1240,18 +1354,6 @@ async function generateAiAgentDecision({ waId, profileName, latestMessageText, a
         '- If the client says they need help with an assignment, project, homework, essay, report, or presentation, reply clearly and ask for details in point-wise bullets.',
         '- If the client has shared a file and the conversation includes extracted task details, respond with a short point-wise summary and ask for confirmation.',
         '- If the client confirms a previously shared summary, acknowledge the confirmation and say the task card is being created.',
-        '-If the client has not shared a file, do not ask for a file unless it is clearly needed to understand the task.',
-        '- If the client has shared a file, do not ask for a file again; instead, summarize the task and ask for confirmation.',
-        '- If the client has shared a file, do not ask for a screenshot or photo of the file; instead, summarize the task and ask for confirmation.',
-        '- Do not create any task card or assignment yourself; only acknowledge and confirm the details.',
-        '- If client ask for a quote or price, do not provide any price; instead, set handoffToHuman=true and handoffReason="pricing inquiry".',
-        '- If the client asks for a quote or price, do not ask for any payment details; instead, set handoffToHuman=true and handoffReason="pricing inquiry".',
-        '- If the client asks any random queries, answer them directly if they are safe and understandable; otherwise, set handoffToHuman=true and handoffReason="unclear or high-risk query".',
-        '- If the client shares a photo then analyze it and if it is a screenshot of an assignment or project, summarize the task and ask for confirmation; otherwise, set handoffToHuman=true and handoffReason="unclear attachment".',
-        '- If the client shares a PDF, DOCX, PPTX, or TXT file, analyze it and summarize the task; if it is not understandable, set handoffToHuman=true and handoffReason="unclear attachment".',
-        '- If the client share same text again and again then transfer the chat to human agent and set handoffToHuman=true and handoffReason="repeated messages".',
-        '- If the client share some unoffensive random text then reply with a short useful answer; if it is offensive or harmful, set handoffToHuman=true and handoffReason="offensive or harmful content".',
-        '- If the client share a link then check if it is safe and relevant; if it is safe, reply with a short useful answer; if it is unsafe or irrelevant, set handoffToHuman=true and handoffReason="unsafe or irrelevant link".',
         '',
         `Client name: ${profileName || waId}`,
         `Latest client message: ${latestMessageText || ''}`,
@@ -1873,7 +1975,7 @@ function ensureWhatsappConfig() {
 }
 
 async function sendGraphJson(path, payload) {
-    const response = await fetch(`https://graph.facebook.com/v22.0/${path}`, {
+    const response = await fetch(`https://graph.facebook.com/${whatsappGraphApiVersion}/${path}`, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${whatsappAccessToken}`,
@@ -1882,6 +1984,20 @@ async function sendGraphJson(path, payload) {
         body: JSON.stringify(payload)
     });
     const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result?.error?.message || 'WhatsApp API request failed');
+    }
+    return result;
+}
+
+async function getGraphJson(path) {
+    const response = await fetch(`https://graph.facebook.com/${whatsappGraphApiVersion}/${path}`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${whatsappAccessToken}`
+        }
+    });
+    const result = await response.json().catch(() => ({}));
     if (!response.ok) {
         throw new Error(result?.error?.message || 'WhatsApp API request failed');
     }
@@ -2287,7 +2403,7 @@ app.post('/api/auth/firebase-session', async (req, res) => {
         if (!email) {
             return res.status(400).json({ ok: false, error: 'Authenticated user email not found' });
         }
-        const role = resolveFirebaseAuthRole(email);
+        const role = resolveDecodedAuthRole(decoded);
         if (!role) {
             return res.status(403).json({
                 ok: false,
@@ -2308,6 +2424,46 @@ app.post('/api/auth/firebase-session', async (req, res) => {
             ok: false,
             error: error?.message || 'Invalid Firebase session'
         });
+    }
+});
+
+app.post('/api/auth/register-agent', async (req, res) => {
+    const adminSession = await requireAdminRequest(req, res);
+    if (!adminSession) return;
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '').trim();
+    if (!email || !password) {
+        return res.status(400).json({ ok: false, error: 'email and password are required' });
+    }
+    if (password.length < 6) {
+        return res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
+    }
+    try {
+        let userRecord;
+        try {
+            userRecord = await admin.auth().getUserByEmail(email);
+            await admin.auth().updateUser(userRecord.uid, { password, disabled: false });
+        } catch (error) {
+            if (error?.code !== 'auth/user-not-found') throw error;
+            userRecord = await admin.auth().createUser({
+                email,
+                password,
+                emailVerified: true,
+                displayName: deriveNameFromEmail(email, '')
+            });
+        }
+        await admin.auth().setCustomUserClaims(userRecord.uid, { role: 'agent' });
+        return res.json({
+            ok: true,
+            user: {
+                uid: userRecord.uid,
+                email,
+                role: 'agent',
+                name: deriveNameFromEmail(email, userRecord.displayName || '')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Agent registration failed' });
     }
 });
 
@@ -2350,6 +2506,7 @@ app.post('/webhook', (req, res) => {
             const contacts = value.contacts || [];
             const messages = value.messages || [];
             const statuses = value.statuses || [];
+            const calls = value.calls || [];
 
             messages.forEach((incomingMessage) => {
                 const waId = normalizeWaId(incomingMessage.from || '');
@@ -2448,6 +2605,42 @@ app.post('/webhook', (req, res) => {
                         status,
                         statusTimestamp
                     }
+                });
+            });
+
+            calls.forEach((callEvent) => {
+                const callId = String(callEvent.id || callEvent.call_id || '').trim();
+                const waId = normalizeWaId(callEvent.from || callEvent.to || callEvent.user_wa_id || callEvent.recipient_id || '');
+                const status = String(callEvent.status || callEvent.event || callEvent.action || 'call_update').toLowerCase();
+                const timestamp = normalizeWebhookTimestamp(callEvent.timestamp, receivedAt);
+                const hasSdpAnswer = Boolean(callEvent.session?.sdp || callEvent.session?.sdp_answer);
+                void appendWhatsappCallLog({
+                    waId,
+                    callId,
+                    status,
+                    timestamp,
+                    sdpAnswerReceived: hasSdpAnswer
+                }).then((log) => {
+                    if (!log) return;
+                    broadcast({
+                        type: 'whatsapp_call_event',
+                        payload: {
+                            ...log,
+                            sdpType: callEvent.session?.sdp_type || '',
+                            sdp: callEvent.session?.sdp || callEvent.session?.sdp_answer || ''
+                        }
+                    });
+                }).catch((error) => {
+                    console.warn('[calls] Failed to persist call webhook:', error?.message || error);
+                });
+                pushWebhookEvent({
+                    receivedAt,
+                    object: body?.object || '',
+                    waId,
+                    callId,
+                    status,
+                    timestamp,
+                    type: 'call'
                 });
             });
         });
@@ -2580,6 +2773,8 @@ app.get('/api/crm/state', async (_req, res) => {
         manualContacts: crmState.manualContacts,
         experts: crmState.experts,
         agentRoster: crmState.agentRoster,
+        agentNotesByContact: crmState.agentNotesByContact,
+        whatsappCallLogs: crmState.whatsappCallLogs,
         whatsappContactIdMap: crmState.whatsappContactIdMap,
         whatsappReadState: crmState.whatsappReadState,
         razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
@@ -3036,6 +3231,8 @@ app.post('/api/crm/state', async (req, res) => {
             manualContacts: crmState.manualContacts,
             experts: crmState.experts,
             agentRoster: crmState.agentRoster,
+            agentNotesByContact: crmState.agentNotesByContact,
+            whatsappCallLogs: crmState.whatsappCallLogs,
             whatsappContactIdMap: crmState.whatsappContactIdMap,
             whatsappReadState: crmState.whatsappReadState,
             razorpayPaymentsByOrder: crmState.razorpayPaymentsByOrder,
@@ -3051,6 +3248,138 @@ app.post('/api/crm/state', async (req, res) => {
     } catch (error) {
         lastFirebaseWriteError = error?.message || 'Failed to persist CRM state';
         return res.status(500).json({ ok: false, error: error?.message || 'Failed to persist CRM state' });
+    }
+});
+
+app.get('/api/whatsapp/call-permissions', async (req, res) => {
+    const waId = normalizeWaId(req.query?.waId || req.query?.user_wa_id || '');
+    if (!waId) return res.status(400).json({ ok: false, error: 'waId is required' });
+    try {
+        ensureWhatsappConfig();
+        if (!whatsappCallingEnabled) {
+            return res.status(503).json({ ok: false, error: 'WHATSAPP_CALLING_ENABLED is not true on the backend' });
+        }
+        const params = new URLSearchParams({ user_wa_id: waId });
+        const data = await getGraphJson(`${whatsappPhoneNumberId}/call_permissions?${params.toString()}`);
+        return res.json({ ok: true, ...data });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to check WhatsApp call permission' });
+    }
+});
+
+app.post('/api/whatsapp/call-permission-request', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const bodyText = String(req.body?.body || 'UniSolveX would like to call you on WhatsApp to support your request.').trim();
+    if (!waId) return res.status(400).json({ ok: false, error: 'waId is required' });
+    try {
+        ensureWhatsappConfig();
+        if (!whatsappCallingEnabled) {
+            return res.status(503).json({ ok: false, error: 'WHATSAPP_CALLING_ENABLED is not true on the backend' });
+        }
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: waId,
+            type: 'interactive',
+            interactive: {
+                type: 'call_permission_request',
+                action: { name: 'call_permission_request' },
+                body: { text: bodyText }
+            }
+        });
+        const messageId = result?.messages?.[0]?.id || '';
+        const timestamp = new Date().toISOString();
+        addMessage(waId, {
+            id: messageId,
+            direction: 'outgoing',
+            senderType: 'human',
+            messageType: 'template',
+            text: bodyText,
+            timestamp,
+            status: 'sent'
+        });
+        await appendWhatsappCallLog({
+            waId,
+            status: 'permission_requested',
+            agent: req.body?.agentName,
+            agentEmail: req.body?.agentEmail,
+            timestamp
+        });
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                id: messageId,
+                direction: 'outgoing',
+                senderType: 'human',
+                messageType: 'template',
+                text: bodyText,
+                timestamp,
+                status: 'sent'
+            }
+        });
+        return res.json({ ok: true, id: messageId });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to send WhatsApp call permission request' });
+    }
+});
+
+app.post('/api/whatsapp/call/start', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const sdp = String(req.body?.sdp || '').trim();
+    const sdpType = String(req.body?.sdpType || 'offer').trim().toLowerCase();
+    if (!waId || !sdp) return res.status(400).json({ ok: false, error: 'waId and SDP offer are required' });
+    try {
+        ensureWhatsappConfig();
+        if (!whatsappCallingEnabled) {
+            return res.status(503).json({ ok: false, error: 'WHATSAPP_CALLING_ENABLED is not true on the backend' });
+        }
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/calls`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            action: 'connect',
+            session: {
+                sdp_type: sdpType || 'offer',
+                sdp
+            },
+            biz_opaque_callback_data: JSON.stringify({
+                agent: String(req.body?.agentName || '').trim(),
+                agentEmail: String(req.body?.agentEmail || '').trim().toLowerCase()
+            })
+        });
+        const callId = result?.calls?.[0]?.id || result?.id || '';
+        const log = await appendWhatsappCallLog({
+            waId,
+            callId,
+            status: 'calling',
+            agent: req.body?.agentName,
+            agentEmail: req.body?.agentEmail
+        });
+        broadcast({ type: 'whatsapp_call_event', payload: log });
+        return res.json({ ok: true, callId, result });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to start WhatsApp call' });
+    }
+});
+
+app.post('/api/whatsapp/call/terminate', async (req, res) => {
+    const callId = String(req.body?.callId || '').trim();
+    if (!callId) return res.status(400).json({ ok: false, error: 'callId is required' });
+    try {
+        ensureWhatsappConfig();
+        if (!whatsappCallingEnabled) {
+            return res.status(503).json({ ok: false, error: 'WHATSAPP_CALLING_ENABLED is not true on the backend' });
+        }
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/calls`, {
+            messaging_product: 'whatsapp',
+            call_id: callId,
+            action: 'terminate'
+        });
+        const log = await appendWhatsappCallLog({ callId, status: 'terminated' });
+        broadcast({ type: 'whatsapp_call_event', payload: log });
+        return res.json({ ok: true, result });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'Failed to terminate WhatsApp call' });
     }
 });
 
@@ -3217,6 +3546,69 @@ app.post('/api/whatsapp/send-media', async (req, res) => {
             error: error?.message || 'Unexpected media send error'
         });
         return res.status(500).json({ ok: false, error: error?.message || 'Unexpected media send error' });
+    }
+});
+
+app.post('/api/whatsapp/send-upi-qr', async (req, res) => {
+    const waId = normalizeWaId(req.body?.waId || '');
+    const qrUrl = String(req.body?.qrUrl || '').trim();
+    const caption = String(req.body?.caption || '').trim();
+    if (!waId || !qrUrl) {
+        return res.status(400).json({ ok: false, error: 'waId and qrUrl are required' });
+    }
+    if (!/^https:\/\/api\.qrserver\.com\/v1\/create-qr-code\//i.test(qrUrl)) {
+        return res.status(400).json({ ok: false, error: 'Only approved QR URLs are allowed' });
+    }
+    try {
+        ensureWhatsappConfig();
+        const result = await sendGraphJson(`${whatsappPhoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            to: waId,
+            type: 'image',
+            image: {
+                link: qrUrl,
+                ...(caption ? { caption } : {})
+            }
+        });
+        const profileName = contactsByWaId.get(waId)?.profileName || waId;
+        const timestamp = new Date().toISOString();
+        const messageId = result?.messages?.[0]?.id || '';
+        const storedMessage = {
+            id: messageId,
+            direction: 'outgoing',
+            text: caption || '[Image] UPI QR Code',
+            timestamp,
+            messageType: 'image',
+            attachmentName: 'unisolvex-upi-qr.png',
+            attachmentUrl: qrUrl,
+            mediaId: '',
+            mimeType: 'image/png',
+            status: 'sent',
+            statusTimestamp: timestamp
+        };
+        const contact = upsertContact(waId, profileName);
+        addMessage(waId, storedMessage);
+        await persistContactSnapshot(contact);
+        await persistMessageSnapshot(waId, storedMessage);
+        broadcast({
+            type: 'whatsapp_message',
+            payload: {
+                waId,
+                profileName,
+                ...storedMessage
+            }
+        });
+        return res.json({
+            ok: true,
+            id: messageId,
+            text: storedMessage.text,
+            messageType: 'image',
+            attachmentName: storedMessage.attachmentName,
+            attachmentUrl: storedMessage.attachmentUrl,
+            mimeType: storedMessage.mimeType
+        });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'QR send failed' });
     }
 });
 

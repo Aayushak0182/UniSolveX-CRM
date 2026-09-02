@@ -78,6 +78,12 @@ function resolveFirebaseAuthRole(email) {
   return firebaseAuthAgentEmails.has(normalizedEmail) ? "agent" : "";
 }
 
+function resolveDecodedAuthRole(decoded) {
+  const claimRole = String(decoded?.role || "").trim().toLowerCase();
+  if (claimRole === "admin" || claimRole === "agent") return claimRole;
+  return resolveFirebaseAuthRole(decoded?.email || "");
+}
+
 function deriveNameFromEmail(email, fallbackDisplayName) {
   const displayName = String(fallbackDisplayName || "").trim();
   if (displayName) return displayName;
@@ -86,6 +92,27 @@ function deriveNameFromEmail(email, fallbackDisplayName) {
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase())
     .trim() || "User";
+}
+
+async function requireAdminRequest(req, res) {
+  const authHeader = String(req.headers.authorization || "").trim();
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) {
+    res.status(401).json({ ok: false, error: "Admin session token is required" });
+    return null;
+  }
+  try {
+    const decoded = await admin.auth().verifyIdToken(token, true);
+    const email = String(decoded?.email || "").trim().toLowerCase();
+    if (resolveDecodedAuthRole(decoded) !== "admin") {
+      res.status(403).json({ ok: false, error: "Only admin can register agents" });
+      return null;
+    }
+    return { decoded, email };
+  } catch (error) {
+    res.status(401).json({ ok: false, error: error?.message || "Invalid admin session" });
+    return null;
+  }
 }
 
 const app = express();
@@ -112,7 +139,7 @@ app.post("/api/auth/firebase-session", async (req, res) => {
   try {
     const decoded = await admin.auth().verifyIdToken(idToken, true);
     const email = String(decoded?.email || "").trim().toLowerCase();
-    const role = resolveFirebaseAuthRole(email);
+    const role = resolveDecodedAuthRole(decoded);
     if (!email || !role) {
       return res.status(403).json({ ok: false, error: "This email is not authorized for CRM access" });
     }
@@ -130,6 +157,46 @@ app.post("/api/auth/firebase-session", async (req, res) => {
       ok: false,
       error: error?.message || "Firebase session verification failed"
     });
+  }
+});
+
+app.post("/api/auth/register-agent", async (req, res) => {
+  const adminSession = await requireAdminRequest(req, res);
+  if (!adminSession) return;
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = String(req.body?.password || "").trim();
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, error: "email and password are required" });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ ok: false, error: "Password must be at least 6 characters" });
+  }
+  try {
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+      await admin.auth().updateUser(userRecord.uid, { password, disabled: false });
+    } catch (error) {
+      if (error?.code !== "auth/user-not-found") throw error;
+      userRecord = await admin.auth().createUser({
+        email,
+        password,
+        emailVerified: true,
+        displayName: deriveNameFromEmail(email, "")
+      });
+    }
+    await admin.auth().setCustomUserClaims(userRecord.uid, { role: "agent" });
+    return res.json({
+      ok: true,
+      user: {
+        uid: userRecord.uid,
+        email,
+        role: "agent",
+        name: deriveNameFromEmail(email, userRecord.displayName || "")
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || "Agent registration failed" });
   }
 });
 
