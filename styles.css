@@ -3045,23 +3045,25 @@ html[data-theme="dark"] .chat-empty-state {
 }
 
 .chat-bubble-note {
-  border-radius: 0.85rem;
+  border-radius: 0.6rem;
   background: linear-gradient(135deg, rgba(254, 243, 199, 0.96), rgba(255, 251, 235, 0.96));
   border: 1px solid rgba(217, 119, 6, 0.22);
   color: #78350f;
+  padding: 0.5rem !important;
 }
 
 .chat-note-label {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 800;
   text-transform: uppercase;
   color: #b45309;
-  margin-bottom: 0.1rem;
+  margin-bottom: 0.05rem;
 }
 
 .chat-note-text {
   color: #78350f;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 #addNoteModeBtn.is-active,

@@ -5726,10 +5726,10 @@ lucide.createIcons();
                         `
                     : escapeHtml(msg.text || '[Unsupported message type]');
                 const bubbleClass = isInternalNote
-                    ? 'chat-bubble-note p-3 shadow-sm text-sm'
+                    ? 'chat-bubble-note p-1.5 shadow-sm text-sm'
                     : (isTemplateMessage || isHandoffMessage)
-                    ? 'chat-bubble-template p-2.5 shadow-sm text-sm text-gray-800'
-                    : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-3 max-w-md shadow-sm text-sm text-gray-800`;
+                    ? 'chat-bubble-template p-2 shadow-sm text-sm text-gray-800'
+                    : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-2 max-w-md shadow-sm text-sm text-gray-800`;
                 wrap.className = 'flex flex-col ' + ((isTemplateMessage || isHandoffMessage || isInternalNote) ? 'items-center' : (incoming ? 'items-start' : 'items-end'));
                 wrap.innerHTML = `
                         <div class="chat-message-row" data-message-id="${escapeHtml(msg.id || '')}" data-message-key="${escapeHtml(clientKey)}">
