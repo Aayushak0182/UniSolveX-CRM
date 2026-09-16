@@ -5783,12 +5783,12 @@ lucide.createIcons();
                                 <p class="chat-template-text">${escapeHtml(msg.text || (isHandoffMessage ? '[Chat transferred to human]' : '[Template message]'))}</p>
                             </div>
                         `
-                    : escapeHtml(msg.text || '[Unsupported message type]');
+                    : escapeHtml(String(msg.text || '[Unsupported message type]').trim());
                 const bubbleClass = isInternalNote
-                    ? 'chat-bubble-note p-1.5 shadow-sm text-sm'
+                    ? 'chat-bubble-note shadow-sm'
                     : (isTemplateMessage || isHandoffMessage)
-                    ? 'chat-bubble-template p-2 shadow-sm text-sm text-gray-800'
-                    : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} p-2 max-w-md shadow-sm text-sm text-gray-800`;
+                    ? 'chat-bubble-template shadow-sm text-gray-800'
+                    : `${incoming ? 'chat-bubble-client' : 'chat-bubble-admin'} shadow-sm text-gray-800`;
                 wrap.className = 'flex flex-col ' + ((isTemplateMessage || isHandoffMessage || isInternalNote) ? 'items-center' : (incoming ? 'items-start' : 'items-end'));
                 wrap.innerHTML = `
                         <div class="chat-message-row" data-message-id="${escapeHtml(msg.id || '')}" data-message-key="${escapeHtml(clientKey)}">

@@ -653,12 +653,12 @@ html[data-theme="dark"] .chat-empty-state {
 
 .chat-bubble-client {
   background-color: var(--chat-bubble-in);
-  border-radius: 0 14px 14px 14px;
+  border-radius: 0 10px 10px 10px;
 }
 
 .chat-bubble-admin {
   background-color: var(--chat-bubble-out);
-  border-radius: 14px 0 14px 14px;
+  border-radius: 10px 0 10px 10px;
 }
 
 .chat-bubble-template {
@@ -894,7 +894,7 @@ html[data-theme="dark"] .chat-empty-state {
   position: relative;
   display: inline-flex;
   width: fit-content;
-  max-width: min(100%, 22rem);
+  max-width: min(100%, 18rem);
 }
 .chat-message-menu-btn {
   position: absolute;
@@ -3102,16 +3102,20 @@ html[data-theme="dark"] .chat-empty-state {
 .chat-bubble-template,
 .chat-bubble-note {
   width: fit-content;
-  max-width: min(22rem, 74vw) !important;
+  max-width: min(18rem, 68vw) !important;
   text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  line-height: 1.22 !important;
+  font-size: 12px !important;
 }
 
 .chat-bubble-admin,
 .chat-bubble-client {
-  padding: 0.42rem 0.58rem !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0.26rem 0.42rem !important;
 }
 
 .chat-bubble-note {
