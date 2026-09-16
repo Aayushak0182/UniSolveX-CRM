@@ -894,7 +894,7 @@ html[data-theme="dark"] .chat-empty-state {
   position: relative;
   display: inline-flex;
   width: fit-content;
-  max-width: min(100%, 28rem);
+  max-width: min(100%, 22rem);
 }
 .chat-message-menu-btn {
   position: absolute;
@@ -2228,6 +2228,71 @@ html[data-theme="dark"] .chat-empty-state {
   padding: 0 !important;
 }
 
+.payment-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid rgba(99, 102, 241, 0.22) !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #4f46e5 !important;
+  padding: 0 !important;
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.payment-history-toggle.is-open {
+  background: #eef2ff !important;
+}
+
+.payment-history-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+.payment-history-transactions {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: #f8fafc;
+  padding: 0.75rem 0.85rem;
+}
+
+.payment-history-transaction {
+  display: grid;
+  grid-template-columns: auto minmax(5rem, 1fr) minmax(8rem, 1.4fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.55rem;
+  background: #ffffff;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.72rem;
+}
+
+.payment-history-transaction + .payment-history-transaction {
+  margin-top: 0.45rem;
+}
+
+.payment-history-transaction span,
+.payment-history-transaction small,
+.payment-history-transaction em {
+  color: #64748b;
+  font-style: normal;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.payment-history-transaction strong {
+  color: #111827;
+  font-weight: 900;
+}
+
+.payment-history-transaction-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .payment-link-history-empty,
 .payment-link-history-muted {
   margin: 0;
@@ -3037,11 +3102,16 @@ html[data-theme="dark"] .chat-empty-state {
 .chat-bubble-template,
 .chat-bubble-note {
   width: fit-content;
-  max-width: min(28rem, 78vw) !important;
+  max-width: min(22rem, 74vw) !important;
   text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.chat-bubble-admin,
+.chat-bubble-client {
+  padding: 0.42rem 0.58rem !important;
 }
 
 .chat-bubble-note {

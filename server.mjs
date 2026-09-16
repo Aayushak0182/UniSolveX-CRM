@@ -755,6 +755,21 @@ function normalizeCrmStatePayload(payload = {}) {
                                 amountPaid: String(link.amountPaid || '').trim(),
                                 receivedStatus: String(link.receivedStatus || 'not_received').trim(),
                                 status: String(link.status || '').trim(),
+                                payments: Array.isArray(link.payments)
+                                    ? link.payments
+                                        .filter((payment) => payment && typeof payment === 'object')
+                                        .map((payment) => ({
+                                            id: String(payment.id || payment.paymentId || '').trim(),
+                                            amount: String(payment.amount || '').trim(),
+                                            currency: String(payment.currency || link.currency || value.currency || 'INR').trim().toUpperCase() || 'INR',
+                                            status: String(payment.status || '').trim(),
+                                            method: String(payment.method || '').trim(),
+                                            transactionId: String(payment.transactionId || payment.id || '').trim(),
+                                            createdAt: String(payment.createdAt || '').trim(),
+                                            event: String(payment.event || '').trim()
+                                        }))
+                                        .filter((payment) => payment.id || (Number(String(payment.amount || '').replace(/[^0-9.]/g, '')) || 0) > 0)
+                                    : [],
                                 expiresAt: String(link.expiresAt || '').trim(),
                                 createdAt: String(link.createdAt || '').trim(),
                                 updatedAt: String(link.updatedAt || '').trim(),
@@ -772,6 +787,21 @@ function normalizeCrmStatePayload(payload = {}) {
                             amountPaid: String(value.amountPaid || '').trim(),
                             receivedStatus: String(value.receivedStatus || 'not_received').trim(),
                             status: String(value.status || '').trim(),
+                            payments: Array.isArray(value.payments)
+                                ? value.payments
+                                    .filter((payment) => payment && typeof payment === 'object')
+                                    .map((payment) => ({
+                                        id: String(payment.id || payment.paymentId || '').trim(),
+                                        amount: String(payment.amount || '').trim(),
+                                        currency: String(payment.currency || value.currency || 'INR').trim().toUpperCase() || 'INR',
+                                        status: String(payment.status || '').trim(),
+                                        method: String(payment.method || '').trim(),
+                                        transactionId: String(payment.transactionId || payment.id || '').trim(),
+                                        createdAt: String(payment.createdAt || '').trim(),
+                                        event: String(payment.event || '').trim()
+                                    }))
+                                    .filter((payment) => payment.id || (Number(String(payment.amount || '').replace(/[^0-9.]/g, '')) || 0) > 0)
+                                : [],
                             expiresAt: String(value.expiresAt || '').trim(),
                             createdAt: String(value.createdAt || value.updatedAt || '').trim(),
                             updatedAt: String(value.updatedAt || '').trim(),
@@ -923,6 +953,7 @@ async function persistCrmState(partialPayload = {}) {
     await firebaseDb.collection('crm_meta').doc('ui_state').set(nextState, { merge: true });
     lastFirebaseWriteAt = new Date().toISOString();
     lastFirebaseWriteError = '';
+    broadcast({ type: 'crm_state_updated', payload: nextState });
     return true;
 }
 
@@ -2933,20 +2964,45 @@ async function recordRazorpayPaymentState(update) {
         amountPaid: String(update.amountPaid || '').trim(),
         receivedStatus: String(update.receivedStatus || 'not_received').trim(),
         status: String(update.status || '').trim(),
+        payments: [],
         expiresAt: String(update.expiresAt || '').trim(),
         createdAt: String(update.createdAt || now).trim(),
         updatedAt: now,
         event: String(update.event || '').trim(),
         methods: Array.isArray(update.methods) ? update.methods.map((method) => String(method || '').trim()).filter(Boolean) : []
     };
+    const paymentId = String(update.paymentId || '').trim();
+    const paymentAmountValue = Number(String(update.paymentAmount || update.amountPaid || '').replace(/[^0-9.]/g, '')) || 0;
+    if (paymentId || paymentAmountValue > 0) {
+        linkEntry.payments = [{
+            id: paymentId,
+            amount: String(update.paymentAmount || update.amountPaid || '').trim(),
+            currency: linkEntry.currency,
+            status: String(update.paymentStatus || update.status || '').trim(),
+            method: String(update.paymentMethod || '').trim(),
+            transactionId: String(update.transactionId || paymentId || '').trim(),
+            createdAt: String(update.paymentCreatedAt || now).trim(),
+            event: linkEntry.event
+        }].filter((payment) => payment.id || payment.amount);
+    }
     const links = Array.isArray(existing.links)
         ? existing.links.filter((link) => link && typeof link === 'object')
         : [];
     const matchIndex = links.findIndex((link) => linkEntry.id && String(link.id || link.paymentLinkId || '') === linkEntry.id);
     if (matchIndex >= 0) {
+        const previousPayments = Array.isArray(links[matchIndex].payments) ? links[matchIndex].payments : [];
+        const mergedPayments = [...previousPayments, ...linkEntry.payments];
+        const seenPaymentKeys = new Set();
+        const payments = mergedPayments.filter((payment) => {
+            const key = String(payment?.id || payment?.transactionId || [payment?.amount, payment?.createdAt, payment?.event].join('|')).trim();
+            if (!key || seenPaymentKeys.has(key)) return false;
+            seenPaymentKeys.add(key);
+            return true;
+        });
         links[matchIndex] = {
             ...links[matchIndex],
             ...linkEntry,
+            payments,
             methods: linkEntry.methods.length ? linkEntry.methods : (Array.isArray(links[matchIndex].methods) ? links[matchIndex].methods : [])
         };
     } else if (linkEntry.id || linkEntry.url) {
@@ -3207,6 +3263,11 @@ app.post('/api/razorpay/webhook', async (req, res) => {
         clientId: String(notes.clientId || '').trim(),
         paymentLinkId,
         paymentId: String(payment?.id || ''),
+        paymentAmount: fromRazorpayMinorUnits(payment?.amount || 0),
+        paymentStatus: String(payment?.status || '').trim(),
+        paymentMethod: String(payment?.method || '').trim(),
+        transactionId: String(payment?.acquirer_data?.rrn || payment?.acquirer_data?.upi_transaction_id || payment?.acquirer_data?.bank_transaction_id || payment?.id || '').trim(),
+        paymentCreatedAt: payment?.created_at ? new Date(Number(payment.created_at) * 1000).toISOString() : new Date().toISOString(),
         shortUrl: String(paymentLink?.short_url || ''),
         currency,
         amount,

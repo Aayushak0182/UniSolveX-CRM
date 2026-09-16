@@ -294,6 +294,7 @@ lucide.createIcons();
         window.addEventListener('popstate', enforceStaticCrmUrl);
         window.addEventListener('hashchange', enforceStaticCrmUrl);
         const hasHttpOrigin = /^https?:\/\//i.test(window.location.origin || '');
+        const sameOriginApiBase = hasHttpOrigin ? sanitizeApiBase(window.location.origin) : '';
         const RENDER_WHATSAPP_API_BASE = 'https://unisolvex-crm-backend-ra02.onrender.com';
         const defaultWhatsappApiBase = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !hasHttpOrigin)
             ? 'http://localhost:3001'
@@ -881,6 +882,7 @@ lucide.createIcons();
                 if (!/^https?:\/\//i.test(normalized)) return;
                 if (!rows.includes(normalized)) rows.push(normalized);
             };
+            add(sameOriginApiBase);
             add(configuredWhatsappApiBase);
             add(localStorage.getItem(WHATSAPP_LAST_WORKING_API_BASE_KEY));
             add(defaultWhatsappApiBase);
@@ -3091,6 +3093,19 @@ lucide.createIcons();
             }
         }
 
+        function markWhatsappThreadUnread(waId, skipRemote) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+            const readState = readWhatsappReadStateFromStorage();
+            readState[normalizedWaId] = '1970-01-01T00:00:00.000Z';
+            writeWhatsappReadStateToStorage(readState, skipRemote);
+            const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            if (item) {
+                const count = getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []);
+                setContactUnreadCount(item, Math.max(1, count || 0));
+            }
+        }
+
         function getUnreadCountForThread(waId, thread) {
             const normalizedWaId = normalizeWaId(waId);
             const readState = readWhatsappReadStateFromStorage();
@@ -3169,7 +3184,7 @@ lucide.createIcons();
                 statusEl.classList.add('text-green-800', 'bg-green-100');
                 return;
             }
-            if (normalized === 'new') {
+            if (normalized === 'new' || normalized === 'new task') {
                 statusEl.classList.add('text-blue-600', 'bg-blue-50');
                 return;
             }
@@ -3436,6 +3451,11 @@ lucide.createIcons();
                             currency: String(row.currency || 'INR').trim().toUpperCase() || 'INR',
                             status: String(row.status || '').trim() || 'created',
                             receivedStatus: String(row.receivedStatus || 'not_received').trim() || 'not_received',
+                            payments: Array.isArray(row.payments)
+                                ? row.payments
+                                    .filter((payment) => payment && typeof payment === 'object')
+                                    .map(normalizeRazorpayPaymentRecord)
+                                : [],
                             expiresAt: String(row.expiresAt || '').trim(),
                             createdAt: String(row.createdAt || '').trim(),
                             updatedAt: String(row.updatedAt || '').trim(),
@@ -3446,6 +3466,19 @@ lucide.createIcons();
             } catch {
                 return [];
             }
+        }
+
+        function normalizeRazorpayPaymentRecord(payment) {
+            return {
+                id: String(payment?.id || payment?.paymentId || '').trim(),
+                amount: String(payment?.amount || '').trim(),
+                currency: String(payment?.currency || 'INR').trim().toUpperCase() || 'INR',
+                status: String(payment?.status || '').trim(),
+                method: String(payment?.method || '').trim(),
+                transactionId: String(payment?.transactionId || payment?.acquirerData?.rrn || payment?.acquirerData?.upi_transaction_id || payment?.acquirerData?.bank_transaction_id || payment?.id || '').trim(),
+                createdAt: String(payment?.createdAt || payment?.capturedAt || '').trim(),
+                event: String(payment?.event || '').trim()
+            };
         }
 
         function writePaymentLinkHistory(card, history) {
@@ -3463,6 +3496,7 @@ lucide.createIcons();
                 currency: String(entry.currency || 'INR').trim().toUpperCase() || 'INR',
                 status: String(entry.status || 'created').trim() || 'created',
                 receivedStatus: String(entry.receivedStatus || 'not_received').trim() || 'not_received',
+                payments: Array.isArray(entry.payments) ? entry.payments.map(normalizeRazorpayPaymentRecord).filter((payment) => payment.id || parseAmountToNumber(payment.amount) > 0) : [],
                 expiresAt: String(entry.expiresAt || '').trim(),
                 createdAt: String(entry.createdAt || new Date().toISOString()).trim(),
                 updatedAt: String(entry.updatedAt || '').trim(),
@@ -3472,7 +3506,19 @@ lucide.createIcons();
             const history = parsePaymentLinkHistory(card);
             const matchIndex = history.findIndex((row) => cleanEntry.id && row.id === cleanEntry.id);
             if (matchIndex >= 0) {
-                history[matchIndex] = { ...history[matchIndex], ...cleanEntry };
+                const mergedPayments = [
+                    ...(Array.isArray(history[matchIndex].payments) ? history[matchIndex].payments : []),
+                    ...cleanEntry.payments
+                ];
+                const uniquePayments = [];
+                const seenPaymentKeys = new Set();
+                mergedPayments.forEach((payment) => {
+                    const key = payment.id || payment.transactionId || [payment.amount, payment.createdAt, payment.event].join('|');
+                    if (!key || seenPaymentKeys.has(key)) return;
+                    seenPaymentKeys.add(key);
+                    uniquePayments.push(payment);
+                });
+                history[matchIndex] = { ...history[matchIndex], ...cleanEntry, payments: uniquePayments };
             } else {
                 history.unshift(cleanEntry);
             }
@@ -3600,6 +3646,7 @@ lucide.createIcons();
                         currency: row.currency,
                         status: row.status,
                         receivedStatus: row.receivedStatus,
+                        payments: row.payments,
                         expiresAt: row.expiresAt,
                         createdAt: row.createdAt || row.updatedAt,
                         updatedAt: row.updatedAt,
@@ -3756,6 +3803,18 @@ lucide.createIcons();
                             .join(', ');
                         const safeUrl = escapeHtml(row.url || '');
                         const linkId = String(row.id || row.paymentLinkId || '').trim();
+                        const payments = Array.isArray(row.payments) ? row.payments : [];
+                        const detailsId = `payment-history-details-${index}`;
+                        const paymentRowsHtml = payments.length
+                            ? payments.map((payment, paymentIndex) => `
+                                <div class="payment-history-transaction">
+                                    <span>#${paymentIndex + 1}</span>
+                                    <strong>${escapeHtml(formatPaymentAmount(payment.currency || row.currency, payment.amount || row.amountPaid || '0'))}</strong>
+                                    <small>${escapeHtml(payment.transactionId || payment.id || '-')}</small>
+                                    <em>${escapeHtml(formatDateTimeForCard(payment.createdAt || row.updatedAt || row.createdAt) || '-')}</em>
+                                </div>
+                            `).join('')
+                            : '<p class="payment-history-transaction-empty">No payment received on this link yet.</p>';
                         return `
                             <article class="payment-history-card">
                                 <div class="payment-history-card-top">
@@ -3769,6 +3828,9 @@ lucide.createIcons();
                                     <div class="payment-history-status-stack">
                                         <span class="payment-history-status ${paymentStatusClass}">${escapeHtml(paymentStatus)}</span>
                                         <span class="payment-link-status-pill ${linkStatusClass}">${escapeHtml(linkStatus)}</span>
+                                        <button type="button" class="payment-history-toggle" data-payment-history-toggle="${escapeHtml(detailsId)}" aria-expanded="false" aria-controls="${escapeHtml(detailsId)}" title="Show payment details">
+                                            <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                                        </button>
                                     </div>
                                 </div>
                                 <div class="payment-history-detail-grid">
@@ -3780,6 +3842,9 @@ lucide.createIcons();
                                 <div class="payment-history-link-row">
                                     <span>${row.url ? escapeHtml(row.url) : 'No link available'}</span>
                                     ${row.url ? `<button type="button" class="payment-link-history-open" data-payment-link-url="${safeUrl}" title="Open payment link" aria-label="Open payment link"><i data-lucide="external-link" class="w-4 h-4"></i></button>` : '<span class="payment-link-history-muted">No link</span>'}
+                                </div>
+                                <div id="${escapeHtml(detailsId)}" class="payment-history-transactions hidden">
+                                    ${paymentRowsHtml}
                                 </div>
                             </article>
                         `;
@@ -4015,18 +4080,9 @@ lucide.createIcons();
                 return;
             }
 
-            if (linkState.url && (linkDisplayStatus === 'active' || linkDisplayStatus === 'not_generated')) {
-                indicatorEl.className = 'order-payment-indicator is-pending';
-                indicatorEl.title = 'Payment pending';
-                indicatorEl.innerHTML = '<span>...</span>';
-                return;
-            }
-
-            if (!hasPaymentInfo) {
-                indicatorEl.className = 'order-payment-indicator hidden ml-1';
-                indicatorEl.title = '';
-                indicatorEl.textContent = '';
-            }
+            indicatorEl.className = 'order-payment-indicator hidden ml-1';
+            indicatorEl.title = '';
+            indicatorEl.textContent = '';
         }
 
         function syncOrderExpertPaymentIndicator(card) {
@@ -5027,7 +5083,7 @@ lucide.createIcons();
         function updateOrderCardPreview(card, overrides = {}) {
             if (!card) return;
             const title = String(overrides.title ?? card.querySelector('.order-title')?.textContent ?? '').trim();
-            const status = String(overrides.status ?? card.dataset.status ?? card.querySelector('.order-status')?.textContent ?? 'New').trim() || 'New';
+            const status = String(overrides.status ?? card.dataset.status ?? card.querySelector('.order-status')?.textContent ?? 'New Task').trim() || 'New Task';
             const actualDeadlineRaw = String(overrides.actualDeadline ?? card.dataset.actualDeadline ?? card.querySelector('.order-deadline')?.dataset.baseValue ?? '').trim();
             const expertDeadlineRaw = String(overrides.expertDeadline ?? card.dataset.expertDeadline ?? card.querySelector('.order-expert-deadline')?.dataset.baseValue ?? '').trim();
             const commentPreview = String(overrides.commentPreview ?? card.dataset.commentPreview ?? '').trim();
@@ -5186,8 +5242,12 @@ lucide.createIcons();
             if (readToggleBtn) {
                 readToggleBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const nextCount = Number(item.dataset.unreadCount || 0) > 0 ? 0 : 1;
-                    setContactUnreadCount(item, nextCount);
+                    const waId = normalizeWaId(item.dataset.waId || '');
+                    if (Number(item.dataset.unreadCount || 0) > 0) {
+                        markWhatsappThreadRead(waId);
+                    } else {
+                        markWhatsappThreadUnread(waId);
+                    }
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -5254,7 +5314,6 @@ lucide.createIcons();
                 item.classList.remove('is-menu-open');
                 item.querySelector('.contact-card-menu')?.classList.add('hidden');
                 setActiveContactItem(item);
-                markWhatsappThreadRead(waId);
                 updateTaskClientInputFromContact(item);
                 applyContactFilter();
                 if (chatHeaderTitle) chatHeaderTitle.textContent = name;
@@ -5925,9 +5984,7 @@ lucide.createIcons();
             if (latestActivityMs > 0) {
                 existing.dataset.lastActivity = String(latestActivityMs);
             }
-            if (activeWhatsappWaId && activeWhatsappWaId === normalizedWaId) {
-                markWhatsappThreadRead(normalizedWaId);
-            } else if (markUnread) {
+            if (markUnread) {
                 setContactUnreadCount(existing, getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []));
             } else {
                 setContactUnreadCount(existing, getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []));
@@ -5977,11 +6034,7 @@ lucide.createIcons();
             const contactItem = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
             if (contactItem) {
                 contactItem.dataset.lastActivity = String(new Date(payload.timestamp || Date.now()).getTime() || Date.now());
-                if (activeWhatsappWaId === waId) {
-                    markWhatsappThreadRead(waId);
-                } else {
-                    setContactUnreadCount(contactItem, getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []));
-                }
+                setContactUnreadCount(contactItem, getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []));
                 updateContactStateUI(contactItem);
                 scheduleContactOrderRefresh();
             }
@@ -6068,8 +6121,7 @@ lucide.createIcons();
                     }, false);
                     const item = contactList.querySelector('.contact-item[data-wa-id="' + waId + '"]');
                     if (item) {
-                        const nextUnreadCount = activeWhatsappWaId === waId ? 0 : getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []);
-                        setContactUnreadCount(item, nextUnreadCount);
+                        setContactUnreadCount(item, getUnreadCountForThread(waId, whatsappMessagesByContact[waId] || []));
                     }
                     maybeCreateAiTaskCard(waId);
                 });
@@ -6171,6 +6223,8 @@ lucide.createIcons();
                         applyWhatsappMessageStatusUpdate(data.payload || {});
                     } else if (data.type === 'whatsapp_call_event') {
                         void applyWhatsappCallEvent(data.payload || {});
+                    } else if (data.type === 'crm_state_updated') {
+                        applyCrmStateSnapshot(data.payload || {}, { includeOrders: true });
                     }
                 } catch (err) {
                     console.error('Invalid WhatsApp socket payload:', err);
@@ -6646,7 +6700,7 @@ lucide.createIcons();
             const title = String(options.title || serviceType || 'Untitled Task').trim();
             const clientId = String(options.clientId || '0000').replace(/[^\d]/g, '') || '0000';
             const orderId = String(options.orderId || getNextOrderId(clientId)).trim();
-            const status = String(options.status || 'New').trim() || 'New';
+            const status = String(options.status || 'New Task').trim() || 'New Task';
             const assignedTo = String(options.assignedTo || agentName).trim();
             const createdBy = String(options.createdBy || agentName).trim();
             const actualDeadline = String(options.actualDeadline || '').trim();
@@ -6837,7 +6891,7 @@ lucide.createIcons();
                 clientId,
                 serviceType,
                 title,
-                status: 'New',
+                status: 'New Task',
                 createdBy: 'AI Agent',
                 assignedTo: agentName,
                 actualDeadline: summaryMessage.parsed.deadline,
@@ -6920,7 +6974,7 @@ lucide.createIcons();
                 serviceType,
                 title,
                 orderId,
-                status: 'New',
+                status: 'New Task',
                 createdBy: agentName,
                 assignedTo: agentName,
                 sessionStart: isLiveSession ? sessionStart : '',
@@ -7082,7 +7136,7 @@ lucide.createIcons();
             const latestComment = comments.length ? comments[comments.length - 1] : null;
             updateOrderCardPreview(activeOrderCard, {
                 title: title || serviceType || 'Untitled',
-                status: status || 'In Progress',
+                status: status || 'New Task',
                 actualDeadline,
                 expertDeadline,
                 createdBy: createdBy || agentName,
@@ -7139,6 +7193,17 @@ lucide.createIcons();
             window.open(url, '_blank', 'noopener,noreferrer');
         });
         odPaymentLinkHistoryList?.addEventListener('click', function(event) {
+            const toggleBtn = event.target.closest('.payment-history-toggle');
+            if (toggleBtn) {
+                const targetId = String(toggleBtn.dataset.paymentHistoryToggle || '').trim();
+                const panel = targetId ? document.getElementById(targetId) : null;
+                if (!panel) return;
+                const isOpening = panel.classList.contains('hidden');
+                panel.classList.toggle('hidden', !isOpening);
+                toggleBtn.classList.toggle('is-open', isOpening);
+                toggleBtn.setAttribute('aria-expanded', isOpening ? 'true' : 'false');
+                return;
+            }
             const btn = event.target.closest('.payment-link-history-open');
             if (!btn) return;
             const url = String(btn.dataset.paymentLinkUrl || '').trim();
