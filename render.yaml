@@ -2,7 +2,6 @@ services:
   - type: web
     name: unisolvex-crm-backend
     env: node
-    rootDir: backend
     plan: free
     buildCommand: npm ci
     startCommand: npm start

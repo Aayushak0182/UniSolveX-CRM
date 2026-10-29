@@ -6171,6 +6171,13 @@ lucide.createIcons();
                         applyWhatsappMessageStatusUpdate(data.payload || {});
                     } else if (data.type === 'whatsapp_call_event') {
                         void applyWhatsappCallEvent(data.payload || {});
+                    } else if (data.type === 'crm_state') {
+                        const taskModalEl = document.getElementById('taskModal');
+                        const isEditingTask = Boolean(orderDetailsModal && !orderDetailsModal.classList.contains('hidden'));
+                        const isCreatingTask = Boolean(taskModalEl && !taskModalEl.classList.contains('hidden'));
+                        applyCrmStateSnapshot(data.payload || {}, {
+                            includeOrders: !(isEditingTask || isCreatingTask)
+                        });
                     }
                 } catch (err) {
                     console.error('Invalid WhatsApp socket payload:', err);
