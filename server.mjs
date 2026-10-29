@@ -932,6 +932,23 @@ async function persistCrmState(partialPayload = {}) {
         ...crmState,
         ...partialPayload
     });
+    const currentReadState = crmState.whatsappReadState && typeof crmState.whatsappReadState === 'object'
+        ? crmState.whatsappReadState
+        : {};
+    const submittedReadState = nextState.whatsappReadState && typeof nextState.whatsappReadState === 'object'
+        ? nextState.whatsappReadState
+        : {};
+    nextState.whatsappReadState = Object.fromEntries(
+        Object.entries({ ...currentReadState, ...submittedReadState })
+            .map(([waId, submittedTimestamp]) => {
+                const currentTimestamp = String(currentReadState[waId] || '').trim();
+                const nextTimestamp = String(submittedReadState[waId] || '').trim();
+                const currentTime = new Date(currentTimestamp).getTime() || 0;
+                const nextTime = new Date(nextTimestamp).getTime() || 0;
+                return [waId, nextTimestamp && (!currentTimestamp || nextTime >= currentTime) ? nextTimestamp : currentTimestamp];
+            })
+            .filter(([waId, timestamp]) => waId && timestamp)
+    );
     crmState.orderListHtml = nextState.orderListHtml;
     crmState.orderAttachmentsById = nextState.orderAttachmentsById;
     crmState.suppressedAiTaskCards = nextState.suppressedAiTaskCards;
@@ -2376,31 +2393,20 @@ app.get('/', (_req, res) => {
     res.status(200).send('OK. Try /health (status) or /webhook (Meta callback).');
 });
 
-app.get('/health', async (_req, res) => {
-    let persistenceReachable = false;
-    let persistenceCheckError = '';
-    try {
-        if (await ensurePersistedStateLoaded(false)) {
-            persistenceReachable = true;
-        } else if (firebasePersistenceInitError) {
-            persistenceCheckError = firebasePersistenceInitError;
-        }
-    } catch (error) {
-        persistenceCheckError = error?.message || 'Failed to reach Firebase persistence';
-    }
+app.get('/health', (_req, res) => {
     return res.json({
         ok: true,
         service: 'whatsapp-webhook',
         at: new Date().toISOString(),
         firebasePersistenceEnabled,
         persistedStateLoaded,
-        persistenceReachable,
+        persistenceReachable: firebasePersistenceEnabled && persistedStateLoaded && !lastPersistedStateError,
         firebasePersistenceInitError,
         lastPersistedStateLoadAt,
         lastPersistedStateError,
         lastFirebaseWriteAt,
         lastFirebaseWriteError,
-        persistenceCheckError
+        persistenceCheckError: firebasePersistenceInitError || lastPersistedStateError
     });
 });
 
