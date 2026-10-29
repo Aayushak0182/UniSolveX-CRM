@@ -894,7 +894,7 @@ html[data-theme="dark"] .chat-empty-state {
   position: relative;
   display: inline-flex;
   width: fit-content;
-  max-width: min(100%, 28rem);
+  max-width: min(100%, 18rem);
 }
 .chat-message-menu-btn {
   position: absolute;
@@ -3037,7 +3037,7 @@ html[data-theme="dark"] .chat-empty-state {
 .chat-bubble-template,
 .chat-bubble-note {
   width: fit-content;
-  max-width: min(28rem, 78vw) !important;
+  max-width: min(18rem, 68vw) !important;
   text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

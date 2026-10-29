@@ -5572,6 +5572,7 @@ lucide.createIcons();
                 }
             }
             whatsappTextSendProcessing = false;
+            setChatSendState(false);
         }
 
         function setChatSendState(isBusy, label) {
@@ -7785,6 +7786,7 @@ lucide.createIcons();
         sendBtn.onclick = async function() {
             const text = (chatInput?.value || '').trim();
             if (!text && pendingAttachments.length === 0) return;
+            if (whatsappSendInFlight) return;
             if (!activeWhatsappWaId) {
                 alert('Select a WhatsApp contact first.');
                 return;
@@ -7816,6 +7818,7 @@ lucide.createIcons();
                     setChatSendState(true, 'Sending attachment...');
                     await sendPendingAttachments(waId, text);
                 } else if (text) {
+                    setChatSendState(true, 'Sending message...');
                     const replyContextSnapshot = activeReplyContext ? { ...activeReplyContext } : null;
                     const tempId = makeTempMessageId('queued');
                     appendLocalOutgoingMessage(activeWhatsappWaId, {

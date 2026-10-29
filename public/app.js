@@ -3091,6 +3091,19 @@ lucide.createIcons();
             }
         }
 
+        function markWhatsappThreadUnread(waId, skipRemote) {
+            const normalizedWaId = normalizeWaId(waId);
+            if (!normalizedWaId) return;
+            const readState = readWhatsappReadStateFromStorage();
+            readState[normalizedWaId] = '1970-01-01T00:00:00.000Z';
+            writeWhatsappReadStateToStorage(readState, skipRemote);
+            const item = contactList.querySelector('.contact-item[data-wa-id="' + normalizedWaId + '"]');
+            if (item) {
+                const count = getUnreadCountForThread(normalizedWaId, whatsappMessagesByContact[normalizedWaId] || []);
+                setContactUnreadCount(item, Math.max(1, count || 0));
+            }
+        }
+
         function getUnreadCountForThread(waId, thread) {
             const normalizedWaId = normalizeWaId(waId);
             const readState = readWhatsappReadStateFromStorage();
@@ -5186,8 +5199,12 @@ lucide.createIcons();
             if (readToggleBtn) {
                 readToggleBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const nextCount = Number(item.dataset.unreadCount || 0) > 0 ? 0 : 1;
-                    setContactUnreadCount(item, nextCount);
+                    const waId = normalizeWaId(item.dataset.waId || '');
+                    if (Number(item.dataset.unreadCount || 0) > 0) {
+                        markWhatsappThreadRead(waId);
+                    } else {
+                        markWhatsappThreadUnread(waId);
+                    }
                     openContactMenuId = '';
                     item.classList.remove('is-menu-open');
                     item.querySelector('.contact-card-menu')?.classList.add('hidden');
@@ -5513,6 +5530,7 @@ lucide.createIcons();
                 }
             }
             whatsappTextSendProcessing = false;
+            setChatSendState(false);
         }
 
         function setChatSendState(isBusy, label) {
@@ -7722,6 +7740,7 @@ lucide.createIcons();
         sendBtn.onclick = async function() {
             const text = (chatInput?.value || '').trim();
             if (!text && pendingAttachments.length === 0) return;
+            if (whatsappSendInFlight) return;
             if (!activeWhatsappWaId) {
                 alert('Select a WhatsApp contact first.');
                 return;
@@ -7753,6 +7772,7 @@ lucide.createIcons();
                     setChatSendState(true, 'Sending attachment...');
                     await sendPendingAttachments(waId, text);
                 } else if (text) {
+                    setChatSendState(true, 'Sending message...');
                     const replyContextSnapshot = activeReplyContext ? { ...activeReplyContext } : null;
                     const tempId = makeTempMessageId('queued');
                     appendLocalOutgoingMessage(activeWhatsappWaId, {
